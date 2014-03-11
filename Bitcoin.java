@@ -1,3 +1,5 @@
+
+
 import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -8,8 +10,10 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -20,12 +24,13 @@ public class Bitcoin {
 	private static byte[] binaryData;
 	private static int invalidTransactions;
 	private static int validTransactions;
-
+	private static List<byte[]> transactionList;
 	public static void main(String[] args) {
 	    binaryData = null;
 	    invalidTransactions = 0;
 	    validTransactions = 0;
 		transactions2 = new HashMap<String,Map<Integer,TransactionOutput>>();
+		transactionList = new ArrayList<byte[]>();
 		try {
 			Path path = Paths.get("./src/transactionData-10000-3.bin");
 			binaryData = Files.readAllBytes(path);
@@ -150,6 +155,7 @@ public class Bitcoin {
 		//transactions.put(transactionHash,current);
 		if(valid) {
 			validTransactions++;
+			transactionList.add(getBytes(binaryData,startIndex,currentIndex));
 			transactions2.put(transactionHash, outputMap);
 			for(String s: changedMap.keySet()) {
 				Set<Integer> indexSet = changedMap.get(s);
@@ -242,6 +248,7 @@ public class Bitcoin {
 		genesisOutputMap.put(0, genesisOutput);
 		//transactions.put(s2,genesis);
 		transactions2.put(s2,genesisOutputMap);
+		transactionList.add(getBytes(binaryData,0,126));
 	}
 
 	public static String bytesToHex(byte[] in) {
