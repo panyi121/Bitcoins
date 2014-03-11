@@ -1,0 +1,46 @@
+import java.io.File;
+import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.nio.file.FileSystems;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+
+public class Bitcoin {
+	
+	public static void main(String[] args) {
+		byte[] binaryData = null;
+		
+		File folder = new File(".");
+		File[] listOfFiles = folder.listFiles();
+
+		    for (int i = 0; i < listOfFiles.length; i++) {
+		      if (listOfFiles[i].isFile()) {
+		        System.out.println("File " + listOfFiles[i].getName());
+		      } else if (listOfFiles[i].isDirectory()) {
+		        System.out.println("Directory " + listOfFiles[i].getName());
+		      }
+		    }
+		/*try {
+			Path path = Paths.get("transactionData-10000-3.bin");
+			binaryData = Files.readAllBytes(path);
+			System.out.println(binaryData.length);
+		} catch (IOException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
+		byte[] firstBytes = getBytes(binaryData, 0, 5);
+		ByteBuffer bb = ByteBuffer.allocate(4);
+		bb.order(ByteOrder.LITTLE_ENDIAN);
+		bb.put(firstBytes, 0, 4);
+		System.out.println(bb.getInt(0));*/
+		
+	}
+	
+	private static byte[] getBytes(byte[] src, int start, int end) {
+		byte[] bb = new byte[end - start];
+		System.arraycopy(src, start, bb, 0, end - start);
+		return bb;
+	}
+}
