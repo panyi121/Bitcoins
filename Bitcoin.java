@@ -1,3 +1,5 @@
+
+import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -15,17 +17,21 @@ import java.util.Set;
 
 public class Bitcoin {
 	
-	//private static Map<String,Transaction> transactions;
-	private static Map<String,Map<Integer,TransactionOutput>> transactions;
 	private static byte[] binaryData;
 	private static int invalidTransactions;
 	private static int validTransactions;
+	private static List<byte[]> transactionList;
+	private static String genesisBlockName;
+	
+	private static Map<String,Map<Integer,TransactionOutput>> transactions;
+	public static final int DIFFICULTY = 3;
 
 	public static void main(String[] args) {
 	    binaryData = null;
 	    invalidTransactions = 0;
 	    validTransactions = 0;
 		transactions = new HashMap<String,Map<Integer,TransactionOutput>>();
+		transactionList = new ArrayList<byte[]>();
 		try {
 			Path path = Paths.get("./src/transactionData-10000-3.bin");
 			binaryData = Files.readAllBytes(path);
@@ -51,39 +57,82 @@ public class Bitcoin {
 		System.out.println(validTransactions);
 		
 		// now we calculate the merkle root
+		Merkle m = new Merkle();
+		byte[] merkleRoot = m.calcMerkleRoot(transactionList);
+		// build the header using the merkle root and start testing nonces
+		byte[] header = new byte[82];
+		// put the version number in the first 4 bytes
+		ByteBuffer versionBB = ByteBuffer.allocate(4);
+		versionBB.order(ByteOrder.LITTLE_ENDIAN);
+		versionBB.putInt(1);
+		byte[] versionBytes = versionBB.array();
+		System.arraycopy(versionBytes, 0, header, 0, versionBytes.length);
+		// copy in the genesis block name
+		byte[] genesisNameBytes = genesisBlockName.getBytes();
+		System.arraycopy(genesisNameBytes, 0, header, 4, genesisNameBytes.length);
+		// copy in the merkle root bytes
+		System.arraycopy(merkleRoot, 0, header, 4, merkleRoot.length);
+		// copy in the difficulty
+		ByteBuffer difficultyBB = ByteBuffer.allocate(2);
+		difficultyBB.order(ByteOrder.LITTLE_ENDIAN);
+		difficultyBB.putShort((short)3);
+		byte[] difficultyBytes = difficultyBB.array();
+		System.arraycopy(difficultyBytes, 0, header, 72, difficultyBytes.length);
+		// start 
+		long nonce = Long.MIN_VALUE;
+		byte[] first24bits = new byte[3];
+		
+		do {
+			// get the current time
+			long time = System.currentTimeMillis();
+			// convert it to seconds
+			time /= 1000;
+			int timeInSeconds = (int) time; 
+			ByteBuffer timeBB = ByteBuffer.allocate(4);
+			timeBB.order(ByteOrder.LITTLE_ENDIAN);
+			timeBB.putInt(timeInSeconds);
+			byte[] timeBytes = timeBB.array();
+			// copy the time into the header
+			System.arraycopy(timeBytes, 0, header, 68, timeBytes.length);
+
+			// copy the nonce into the header
+			ByteBuffer nonceBB = ByteBuffer.allocate(8);
+			nonceBB.order(ByteOrder.LITTLE_ENDIAN);
+			nonceBB.putLong(nonce);
+			byte[] nonceBytes = nonceBB.array();
+			System.arraycopy(nonceBytes, 0, header, 74, nonceBytes.length);
+			
+			byte[] hash = m.dHash(header);
+			System.arraycopy(hash, hash.length - DIFFICULTY, first24bits, 0, DIFFICULTY);
+			nonce++;
+		} while (!isAllZeros(first24bits)); /* while the  */
+		// we've found a nonce that works so we can add the block header
+		System.out.println("found a nonce: " + nonce);
+
+		// create a coinbase transaction.
+		byte[] coinbase = new byte[40];
+		// fill in the number of inputs, which is 0 because its a coinbase transaction
+		ByteBuffer countBB = ByteBuffer.allocate(0);
+		countBB.order(ByteOrder.LITTLE_ENDIAN);
+		countBB.putShort((short)0);
+		System.arraycopy(countBB, 0, coinbase, 0, 2);
+		// fill in the number of outputs which is 1
+		countBB.putShort(0, (short) 0);
+
+		String pubkey = "-----BEGIN RSA PUBLIC KEY-----\nMIGJAoGBAN3MxXHcbc1VNKTOgdm7W+i/dVnjv8vYGlbkdaTKzYgi8rQm126Sri87\n702UBNzmkkZyKbRKL/Bfc4EG8/Mt9Pd2xQlRyXCL9FnIFWHyhfIQtW+oBsGI5UhG\nI8B8MiPOMfb6d/PdK+vd4riUxHAvCkHW5Lw0szAD1RVGbkG/7qnzAgMBAAE=\n-----END RSA PUBLIC KEY-----";
+		// dHash it
+		byte[] hashedPubKey = m.dHash(pubkey.getBytes());
 		
 	}
-	
-	public static String calcMerkleRoot(List<byte[]> input) {
-		List<byte[]> start = new ArrayList<byte[]>();
-		for (int j = 0; j < input.size(); j++) {
-			start.add(dHash(input.get(j)));
-		}
-		while (start.size() != 1) {
-			if (start.size() % 2 == 1) {
-				start.add(start.get(start.size() - 1));
-			}
-			List<byte[]> next = new ArrayList<byte[]>();
-			for (int i = 0; i < start.size(); i += 2) {
-				next.add(dHash(concatHash(start.get(i), start.get(i + 1))));
 
+	public static boolean isAllZeros(byte[] input) {
+		for (int i = 0; i < input.length; i++) {
+			if (input[i] != 0x00) {
+				return false;
 			}
-			start = next;
 		}
-		return bitsToHex(start.get(0));
+		return true;
 	}
-	
-	// only use this if a and b have the same length
-	public static byte[] concatHash(byte[] a, byte[] b) {
-		if (a.length != b.length) {
-			throw new IllegalArgumentException();
-		}
-		byte[] c = new byte[a.length * 2];
-		System.arraycopy(a, 0, c, 0, a.length);
-		System.arraycopy(b, 0, c, b.length, a.length);
-		return c;
-	}
-
 	
 	public static int processTransaction(int startIndex) {
 		boolean valid = true;
@@ -184,6 +233,7 @@ public class Bitcoin {
 		//transactions.put(transactionHash,current);
 		if(valid) {
 			validTransactions++;
+			transactionList.add(getBytes(binaryData,startIndex,currentIndex));
 			transactions.put(transactionHash, outputMap);
 			for(String s: changedMap.keySet()) {
 				Set<Integer> indexSet = changedMap.get(s);
@@ -229,6 +279,7 @@ public class Bitcoin {
 		byte[] merkleBytes = getBytes(binaryData,36,68);
 		String s2 = bytesToHex(merkleBytes);
 		System.out.println("Merkle : " + s2);
+		genesisBlockName = s2;
 		
 		ByteBuffer creationTimeBB = ByteBuffer.allocate(4);
 		creationTimeBB.order(ByteOrder.LITTLE_ENDIAN);
@@ -274,8 +325,9 @@ public class Bitcoin {
 		Transaction genesis = new Transaction(s2);
 		Map<Integer,TransactionOutput> genesisOutputMap = genesis.getOutputMap();
 		genesisOutputMap.put(0, genesisOutput);
-		//transactions.put(s2,genesis);
+
 		transactions.put(s2,genesisOutputMap);
+		transactionList.add(getBytes(binaryData,0,126));
 	}
 
 	public static String bytesToHex(byte[] in) {
