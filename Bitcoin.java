@@ -1,4 +1,3 @@
-
 import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -10,18 +9,25 @@ import java.nio.file.Paths;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 
 public class Bitcoin {
 	
-	private static Map<String,Transaction> transactions;
-	
+	//private static Map<String,Transaction> transactions;
+	private static Map<String,Map<Integer,TransactionOutput>> transactions2;
 	private static byte[] binaryData;
-	
+	private static int invalidTransactions;
+	private static int validTransactions;
+	private static int noInputTransactions;
 	public static void main(String[] args) {
 	    binaryData = null;
-		transactions = new HashMap<String,Transaction>();
-		
+	    invalidTransactions = 0;
+	    validTransactions = 0;
+	    noInputTransactions = 0;
+		//transactions = new HashMap<String,Transaction>();
+		transactions2 = new HashMap<String,Map<Integer,TransactionOutput>>();
 		try {
 			Path path = Paths.get("./src/transactionData-10000-3.bin");
 			binaryData = Files.readAllBytes(path);
@@ -43,9 +49,13 @@ public class Bitcoin {
 			currentIndex = processTransaction(currentIndex);
 			
 		}
+		System.out.println(invalidTransactions);
+		System.out.println(validTransactions);
 	}
 	
 	public static int processTransaction(int startIndex) {
+		boolean valid = true;
+		Map<String,Set<Integer>> changedMap = new HashMap<String,Set<Integer>>();
 		int currentIndex = startIndex;
 		ByteBuffer numInputsBB = ByteBuffer.allocate(2);
 		numInputsBB.order(ByteOrder.LITTLE_ENDIAN);
@@ -73,28 +83,39 @@ public class Bitcoin {
 			int length = lengthBB.getShort(0);
 			System.out.println("Public key length: " + length);
 			currentIndex+=2;
+			byte[] inputKey = getBytes(binaryData,currentIndex,currentIndex+length);
 			currentIndex+=length;
 			
-			if(transactions.containsKey(s1)) {
-				Transaction prev = transactions.get(s1);
-				Map<Integer,TransactionOutput> outputs = prev.getOutputMap();
-				if(outputs.containsKey(index)) {
-					TransactionOutput output = outputs.get(index);
+			if(transactions2.containsKey(s1)) {
+				//Transaction prev = transactions.get(s1);
+				//Map<Integer,TransactionOutput> outputs = prev.getOutputMap();
+				Map<Integer,TransactionOutput> outputs2 = transactions2.get(s1);
+				if(!changedMap.containsKey(s1)) {
+					changedMap.put(s1,new HashSet<Integer>());
+				}
+				if(outputs2.containsKey(index)) {
+					TransactionOutput output = outputs2.get(index);
 					if(!output.isUsed()) {
-						output.setUsed(true);
-						int value = output.getValue();
-						totalInputValue += value;
+						String hashedInputKey = dHash(inputKey);
+						if(hashedInputKey.equals(output.getKey())) {
+							changedMap.get(s1).add(index);
+							int value = output.getValue();
+							totalInputValue += value;
+						} else {
+							System.out.println("Transaction invalid: Hashed input key does not equal hashed output key");
+							valid = false;
+						}
 					} else { 
 						System.out.println("Transaction invalid: Output already used before, write code to deal with this");
-						System.exit(1);
+						valid = false;
 					}
 				} else {
 					System.out.println("Transaction invalid: Index not found in transaction's output map, write code to deal with this");
-					System.exit(1);
+					valid = false;
 				}
 			} else {
 				System.out.println("Transaction invalid: Key not found, write code to deal with this");
-				System.exit(1);
+				valid = false;
 			}
 		}
 		ByteBuffer numOutputsBB = ByteBuffer.allocate(2);
@@ -122,13 +143,25 @@ public class Bitcoin {
 		System.out.println(" Total Input Value: " + totalInputValue + " Total output value: " + totalOutputValue);
 		if(totalOutputValue > totalInputValue) {
 			System.out.println("Transaction invalid: Output value > input value, write code to deal with this");
-			System.exit(1);
+			valid = false;
 		}
 		
 		String transactionHash = dHash(getBytes(binaryData,startIndex,currentIndex));
 		Transaction current = new Transaction(transactionHash);
 		current.setOutputMap(outputMap);
-		transactions.put(transactionHash,current);
+		//transactions.put(transactionHash,current);
+		if(valid) {
+			validTransactions++;
+			transactions2.put(transactionHash, outputMap);
+			for(String s: changedMap.keySet()) {
+				Set<Integer> indexSet = changedMap.get(s);
+				for(Integer i: indexSet) {
+					transactions2.get(s).get(i).setUsed(true);
+				}
+			}
+		} else {
+			invalidTransactions++;
+		}
 		return currentIndex;
 	}
 
@@ -167,7 +200,7 @@ public class Bitcoin {
 		byte[] merkleBytes = getBytes(binaryData,36,68);
 		String s2 = bytesToHex(merkleBytes);
 		System.out.println("Merkle : " + s2);
-		z`z
+		
 		ByteBuffer creationTimeBB = ByteBuffer.allocate(4);
 		creationTimeBB.order(ByteOrder.LITTLE_ENDIAN);
 		creationTimeBB.put(binaryData,68,4);
@@ -212,7 +245,8 @@ public class Bitcoin {
 		Transaction genesis = new Transaction(s2);
 		Map<Integer,TransactionOutput> genesisOutputMap = genesis.getOutputMap();
 		genesisOutputMap.put(0, genesisOutput);
-		transactions.put(s2,genesis);
+		//transactions.put(s2,genesis);
+		transactions2.put(s2,genesisOutputMap);
 	}
 	public static String bytesToHex(byte[] in) {
 	    final StringBuilder builder = new StringBuilder();
