@@ -20,13 +20,11 @@ public class Bitcoin {
 	private static byte[] binaryData;
 	private static int invalidTransactions;
 	private static int validTransactions;
-	private static int noInputTransactions;
+
 	public static void main(String[] args) {
 	    binaryData = null;
 	    invalidTransactions = 0;
 	    validTransactions = 0;
-	    noInputTransactions = 0;
-		//transactions = new HashMap<String,Transaction>();
 		transactions2 = new HashMap<String,Map<Integer,TransactionOutput>>();
 		try {
 			Path path = Paths.get("./src/transactionData-10000-3.bin");
@@ -165,7 +163,6 @@ public class Bitcoin {
 		return currentIndex;
 	}
 
-
 	public static String dHash(byte[] bytes) {
 		MessageDigest md = null;
 		try {
@@ -182,10 +179,8 @@ public class Bitcoin {
 		for (byte b:byteArray) {
 		    result.append(String.format("%02x", b));
 		}
-		
 		return result.toString();
 	}
-		
 	
 	public static void parseGenesis() {
 		ByteBuffer versionBB = ByteBuffer.allocate(4);
@@ -248,6 +243,7 @@ public class Bitcoin {
 		//transactions.put(s2,genesis);
 		transactions2.put(s2,genesisOutputMap);
 	}
+
 	public static String bytesToHex(byte[] in) {
 	    final StringBuilder builder = new StringBuilder();
 	    for(byte b : in) {
