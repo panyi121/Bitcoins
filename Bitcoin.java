@@ -1,22 +1,22 @@
-import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
 public class Bitcoin {
 	
 	//private static Map<String,Transaction> transactions;
-	private static Map<String,Map<Integer,TransactionOutput>> transactions2;
+	private static Map<String,Map<Integer,TransactionOutput>> transactions;
 	private static byte[] binaryData;
 	private static int invalidTransactions;
 	private static int validTransactions;
@@ -25,7 +25,7 @@ public class Bitcoin {
 	    binaryData = null;
 	    invalidTransactions = 0;
 	    validTransactions = 0;
-		transactions2 = new HashMap<String,Map<Integer,TransactionOutput>>();
+		transactions = new HashMap<String,Map<Integer,TransactionOutput>>();
 		try {
 			Path path = Paths.get("./src/transactionData-10000-3.bin");
 			binaryData = Files.readAllBytes(path);
@@ -49,7 +49,41 @@ public class Bitcoin {
 		}
 		System.out.println(invalidTransactions);
 		System.out.println(validTransactions);
+		
+		// now we calculate the merkle root
+		
 	}
+	
+	public static String calcMerkleRoot(List<byte[]> input) {
+		List<byte[]> start = new ArrayList<byte[]>();
+		for (int j = 0; j < input.size(); j++) {
+			start.add(dHash(input.get(j)));
+		}
+		while (start.size() != 1) {
+			if (start.size() % 2 == 1) {
+				start.add(start.get(start.size() - 1));
+			}
+			List<byte[]> next = new ArrayList<byte[]>();
+			for (int i = 0; i < start.size(); i += 2) {
+				next.add(dHash(concatHash(start.get(i), start.get(i + 1))));
+
+			}
+			start = next;
+		}
+		return bitsToHex(start.get(0));
+	}
+	
+	// only use this if a and b have the same length
+	public static byte[] concatHash(byte[] a, byte[] b) {
+		if (a.length != b.length) {
+			throw new IllegalArgumentException();
+		}
+		byte[] c = new byte[a.length * 2];
+		System.arraycopy(a, 0, c, 0, a.length);
+		System.arraycopy(b, 0, c, b.length, a.length);
+		return c;
+	}
+
 	
 	public static int processTransaction(int startIndex) {
 		boolean valid = true;
@@ -84,10 +118,10 @@ public class Bitcoin {
 			byte[] inputKey = getBytes(binaryData,currentIndex,currentIndex+length);
 			currentIndex+=length;
 			
-			if(transactions2.containsKey(s1)) {
+			if(transactions.containsKey(s1)) {
 				//Transaction prev = transactions.get(s1);
 				//Map<Integer,TransactionOutput> outputs = prev.getOutputMap();
-				Map<Integer,TransactionOutput> outputs2 = transactions2.get(s1);
+				Map<Integer,TransactionOutput> outputs2 = transactions.get(s1);
 				if(!changedMap.containsKey(s1)) {
 					changedMap.put(s1,new HashSet<Integer>());
 				}
@@ -150,11 +184,11 @@ public class Bitcoin {
 		//transactions.put(transactionHash,current);
 		if(valid) {
 			validTransactions++;
-			transactions2.put(transactionHash, outputMap);
+			transactions.put(transactionHash, outputMap);
 			for(String s: changedMap.keySet()) {
 				Set<Integer> indexSet = changedMap.get(s);
 				for(Integer i: indexSet) {
-					transactions2.get(s).get(i).setUsed(true);
+					transactions.get(s).get(i).setUsed(true);
 				}
 			}
 		} else {
@@ -241,7 +275,7 @@ public class Bitcoin {
 		Map<Integer,TransactionOutput> genesisOutputMap = genesis.getOutputMap();
 		genesisOutputMap.put(0, genesisOutput);
 		//transactions.put(s2,genesis);
-		transactions2.put(s2,genesisOutputMap);
+		transactions.put(s2,genesisOutputMap);
 	}
 
 	public static String bytesToHex(byte[] in) {
