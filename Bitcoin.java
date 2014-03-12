@@ -1,4 +1,4 @@
-
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -6,6 +6,7 @@ import java.nio.ByteOrder;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.security.InvalidKeyException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
@@ -15,10 +16,15 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import javax.crypto.Cipher;
+import javax.crypto.NoSuchPaddingException;
+import javax.crypto.spec.SecretKeySpec;
+
 public class Bitcoin {
 	
 	private static byte[] binaryData;
 	private static int invalidTransactions;
+	private static Cipher aes;
 	private static int validTransactions;
 	private static List<byte[]> transactionList;
 	private static String genesisBlockName;
@@ -26,7 +32,14 @@ public class Bitcoin {
 	private static Map<String,Map<Integer,TransactionOutput>> transactions;
 	public static final int DIFFICULTY = 3;
 
-	public static void main(String[] args) {
+	private static String identity = "-----BEGIN RSA PUBLIC KEY-----"+
+									 "MIGJAoGBAN3MxXHcbc1VNKTOgdm7W+i/dVnjv8vYGlbkdaTKzYgi8rQm126Sri87"+
+									 "702UBNzmkkZyKbRKL/Bfc4EG8/Mt9Pd2xQlRyXCL9FnIFWHyhfIQtW+oBsGI5UhG"+
+									 "I8B8MiPOMfb6d/PdK+vd4riUxHAvCkHW5Lw0szAD1RVGbkG/7qnzAgMBAAE="+
+									 "-----END RSA PUBLIC KEY-----";
+	private static String identityBytes = "1f5a0200bc94ae4264642855786d9c2bb436b9e129ef95e6416136c03f339581";
+	
+	public static void main(String[] args) throws IOException, InvalidKeyException {
 	    binaryData = null;
 	    invalidTransactions = 0;
 	    validTransactions = 0;
@@ -37,6 +50,12 @@ public class Bitcoin {
 			binaryData = Files.readAllBytes(path);
 			System.out.println(binaryData.length);
 		} catch (IOException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
+		try {
+			aes = Cipher.getInstance("RSA/ECB/PKCS1Padding");
+		} catch (NoSuchAlgorithmException | NoSuchPaddingException e) {
 			// TODO Auto-generated catch block
 			e.printStackTrace();
 		}
@@ -134,9 +153,12 @@ public class Bitcoin {
 		return true;
 	}
 	
-	public static int processTransaction(int startIndex) {
+	public static int processTransaction(int startIndex) throws IOException, InvalidKeyException {
 		boolean valid = true;
 		Map<String,Set<Integer>> changedMap = new HashMap<String,Set<Integer>>();
+		Map<String,String> signatureMap = new HashMap<String,String>();
+		ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+		
 		int currentIndex = startIndex;
 		ByteBuffer numInputsBB = ByteBuffer.allocate(2);
 		numInputsBB.order(ByteOrder.LITTLE_ENDIAN);
@@ -145,7 +167,10 @@ public class Bitcoin {
 		System.out.println("Num Inputs: " + inputs);
 		currentIndex += 2;
 		int totalInputValue = 0;
+		outputStream.write(getBytes(binaryData,0,2));
+		
 		for(int i = 0; i < inputs; i++) {
+			int inputStart=currentIndex;
 			System.out.println("Input:" + i+1);
 			byte[] prevTransBytes = getBytes(binaryData,currentIndex,currentIndex+32);
 			currentIndex +=32;
@@ -157,7 +182,10 @@ public class Bitcoin {
 			int index = indexBB.getShort(0);
 			System.out.println("Prev Trans index: " + index);
 			currentIndex += 2;
+			int signatureStart = currentIndex;
+			String signature = bytesToHex(getBytes(binaryData,currentIndex,currentIndex+128));
 			currentIndex += 128;
+			int signatureEnd = currentIndex;
 			ByteBuffer lengthBB = ByteBuffer.allocate(2);
 			lengthBB.order(ByteOrder.LITTLE_ENDIAN);
 			lengthBB.put(binaryData,currentIndex,2);
@@ -166,6 +194,9 @@ public class Bitcoin {
 			currentIndex+=2;
 			byte[] inputKey = getBytes(binaryData,currentIndex,currentIndex+length);
 			currentIndex+=length;
+			int inputEnd = currentIndex;
+			outputStream.write(getBytes(binaryData,inputStart,signatureStart));
+			outputStream.write(getBytes(binaryData,signatureEnd,inputEnd));
 			
 			if(transactions.containsKey(s1)) {
 				//Transaction prev = transactions.get(s1);
@@ -179,6 +210,7 @@ public class Bitcoin {
 					if(!output.isUsed()) {
 						String hashedInputKey = dHash(inputKey);
 						if(hashedInputKey.equals(output.getKey())) {
+							signatureMap.put(output.getKey(),signature);
 							changedMap.get(s1).add(index);
 							int value = output.getValue();
 							totalInputValue += value;
@@ -199,6 +231,7 @@ public class Bitcoin {
 				valid = false;
 			}
 		}
+		int outputStart = currentIndex;
 		ByteBuffer numOutputsBB = ByteBuffer.allocate(2);
 		numOutputsBB.order(ByteOrder.LITTLE_ENDIAN);
 		numOutputsBB.put(binaryData,currentIndex,2);
@@ -226,12 +259,26 @@ public class Bitcoin {
 			System.out.println("Transaction invalid: Output value > input value, write code to deal with this");
 			valid = false;
 		}
-		
+		outputStream.write(getBytes(binaryData,outputStart,currentIndex));
 		String transactionHash = dHash(getBytes(binaryData,startIndex,currentIndex));
 		Transaction current = new Transaction(transactionHash);
 		current.setOutputMap(outputMap);
 		//transactions.put(transactionHash,current);
+		
 		if(valid) {
+			
+			byte[] transactionBytes = outputStream.toByteArray();
+			String newHash = dHash(transactionBytes);
+			for(String key: signatureMap.keySet()) {
+				String signature = signatureMap.get(key);
+				byte[] keyBytes = key.getBytes();
+				SecretKeySpec privateKey = new SecretKeySpec(keyBytes, "RSA/ECB/PKCS1Padding");
+				aes.init(Cipher.ENCRYPT_MODE, privateKey);
+				byte[] encrypted= new byte[aes.getOutputSize(128)];
+				String newSignature = bytesToHex(encrypted);
+				System.out.println(newSignature);
+				System.out.println(signature);
+			}
 			validTransactions++;
 			transactionList.add(getBytes(binaryData,startIndex,currentIndex));
 			transactions.put(transactionHash, outputMap);
@@ -267,55 +314,68 @@ public class Bitcoin {
 	}
 	
 	public static void parseGenesis() {
+		// get the version number
 		ByteBuffer versionBB = ByteBuffer.allocate(4);
 		versionBB.order(ByteOrder.LITTLE_ENDIAN);
 		versionBB.put(binaryData, 0, 4);
 		System.out.println("Version: " + versionBB.getInt(0));
-		
+	
+		// get the previous block hash which should be zero
 		byte[] prevBlockBytes = getBytes(binaryData,4,36);
 		String s1 = bytesToHex(prevBlockBytes);
 		System.out.println("Prev Block Hash : " + s1);
-		
+	
+		// 
 		byte[] merkleBytes = getBytes(binaryData,36,68);
 		String s2 = bytesToHex(merkleBytes);
 		System.out.println("Merkle : " + s2);
 		genesisBlockName = s2;
 		
+		// get the creation time
 		ByteBuffer creationTimeBB = ByteBuffer.allocate(4);
 		creationTimeBB.order(ByteOrder.LITTLE_ENDIAN);
 		creationTimeBB.put(binaryData,68,4);
 		System.out.println("Creation Time: " + creationTimeBB.getInt(0));
-		
+	
+		// get the difficulty
 		ByteBuffer difficultyBB = ByteBuffer.allocate(2);
 		difficultyBB.order(ByteOrder.LITTLE_ENDIAN);
 		difficultyBB.put(binaryData,72,2);
 		System.out.println("Difficulty: " + difficultyBB.getShort(0));
-		
+	
+		// get the nonce
 		ByteBuffer nonceBB = ByteBuffer.allocate(8);
 		nonceBB.order(ByteOrder.LITTLE_ENDIAN);
 		nonceBB.put(binaryData,74,8);
 		System.out.println("Nonce: " + nonceBB.getLong(0));
-		
+	
+		// get the genesis block transaction count, should be 1
 		ByteBuffer numTransactionsTimeBB = ByteBuffer.allocate(4);
 		numTransactionsTimeBB.order(ByteOrder.LITTLE_ENDIAN);
 		numTransactionsTimeBB.put(binaryData,82,4);
 		System.out.println("\nnumTransactions: " + numTransactionsTimeBB.getInt(0));
-		
+	
+		// now we are examining the coinbase transaction
+
+		// get the number of input specifiers. should be zero because its a coinbase transaction
 		ByteBuffer numInputsBB = ByteBuffer.allocate(2);
 		numInputsBB.order(ByteOrder.LITTLE_ENDIAN);
 		numInputsBB.put(binaryData,86,2);
 		System.out.println("numInputs: " + numInputsBB.getShort(0));
-		
+	
+		// get the number of outputs, should be one
 		ByteBuffer numOutputsBB = ByteBuffer.allocate(2);
 		numOutputsBB.order(ByteOrder.LITTLE_ENDIAN);
 		numOutputsBB.put(binaryData,88,2);
 		System.out.println("numOutputs: " + numOutputsBB.getShort(0));
-		
+	
+		// get the value of this coinbase output
 		ByteBuffer valueBB = ByteBuffer.allocate(4);
 		valueBB.order(ByteOrder.LITTLE_ENDIAN);
 		valueBB.put(binaryData,90,4);
 		System.out.println("Value: " + valueBB.getInt(0));
-		
+	
+		// 
 		byte[] hashedPublicKeyBytes = getBytes(binaryData,94,126);
 		String s3 = bytesToHex(hashedPublicKeyBytes);
 		System.out.println("Hashed Public Key : " + s3);
