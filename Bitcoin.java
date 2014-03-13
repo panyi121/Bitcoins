@@ -1,5 +1,6 @@
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.PrintWriter;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.file.Files;
@@ -161,6 +162,15 @@ public class Bitcoin {
 		// we've found a nonce that works so we can build the output file then we are done
 		System.out.println("found a nonce: " + nonce);
 		
+		for(String s: balancesMap.keySet()) {
+			
+			PrintWriter writer = new PrintWriter("balances.txt", "UTF-8");
+			writer.println("Key: " + s);
+			writer.println("Balance: " + balancesMap.get(s));
+			writer.println();
+			writer.close();
+		}
+		
 	}
 
 	public static boolean isAllZeros(byte[] input) {
@@ -181,7 +191,9 @@ public class Bitcoin {
 		// a map from hashed public keys to signatures
 		Map<String,String> signatureMap = new HashMap<String,String>();
 		ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
-
+		//temporary map used to store changes in balance from this transaction, changes copied to main
+		//balances map if transaction deemed valid
+		Map<String,Integer> tempBalancesMap = new HashMap<String,Integer>();
 		int currentIndex = startIndex;
 
 		ByteBuffer numInputsBB = ByteBuffer.allocate(2);
@@ -260,6 +272,16 @@ public class Bitcoin {
 							int value = output.getValue();
 							// transaction is valid so far, so increment its total value
 							totalInputValue += value;
+							
+							//subtract value from key's balance
+							if(!tempBalancesMap.containsKey(hashedInputKey)) {
+								tempBalancesMap.put(hashedInputKey,0-value);
+							} else {
+								tempBalancesMap.put(hashedInputKey,tempBalancesMap.get(hashedInputKey)-value);
+							}
+							
+							
+							
 						} else {
 							System.out.println("Transaction invalid: Hashed input key does not equal hashed output key");
 							valid = false;
@@ -300,9 +322,17 @@ public class Bitcoin {
 			totalOutputValue += outputValue;
 			byte[] hashedPublicKeyBytes = getBytes(binaryData,currentIndex,currentIndex+32);
 			currentIndex +=32;
-			String s1 = bytesToHex(hashedPublicKeyBytes);
-			TransactionOutput output = new TransactionOutput(outputValue,s1);
+			String hexKey = bytesToHex(hashedPublicKeyBytes);
+			TransactionOutput output = new TransactionOutput(outputValue,hexKey);
 			outputMap.put(i,output);
+			//subtract value from key's balance
+			if(!tempBalancesMap.containsKey(hexKey)) {
+				tempBalancesMap.put(hexKey,outputValue);
+			} else {
+				tempBalancesMap.put(hexKey,tempBalancesMap.get(hexKey)+outputValue);
+			}
+			
+			
 		}
 		System.out.println(" Total Input Value: " + totalInputValue + " Total output value: " + totalOutputValue);
 		if(totalOutputValue > totalInputValue) {
@@ -319,7 +349,6 @@ public class Bitcoin {
 		//transactions.put(transactionHash,current);
 		// should we break before getting here? if it's invalid then we're done with it 
 		if (valid) {
-			balancesMap.put(transactionHash,totalOutputValue);
 			byte[] transactionBytes = outputStream.toByteArray();
 			String newHash = dHash(transactionBytes);
 			
@@ -335,6 +364,14 @@ public class Bitcoin {
 				String newSignature = bytesToHex(encrypted);
 				System.out.println(newSignature);
 				System.out.println(signature);
+			}
+			
+			for(String hexKey: tempBalancesMap.keySet()) {
+				if(!balancesMap.containsKey(hexKey)) {
+					balancesMap.put(hexKey,tempBalancesMap.get(hexKey));
+				} else {
+					balancesMap.put(hexKey,balancesMap.get(hexKey)+tempBalancesMap.get(hexKey));
+				}
 			}
 			
 			validTransactions++;
