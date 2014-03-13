@@ -27,6 +27,7 @@ public class Bitcoin {
 	private static int validTransactions;
 	private static List<byte[]> transactionList;
 	private static String genesisBlockName;
+	private static Map<String,Integer> balancesMap;
 	private static byte[] dHashOfGenesisBlock;
 	private static Map<String,Map<Integer,TransactionOutput>> transactions;
 	public static final int DIFFICULTY = 3;
@@ -43,6 +44,7 @@ public class Bitcoin {
 	public static void main(String[] args) throws IOException, InvalidKeyException {
 		txFee = 0;
 	    binaryData = null;
+	    balancesMap = new HashMap<String,Integer>();
 	    invalidTransactions = 0;
 	    validTransactions = 0;
 		transactions = new HashMap<String,Map<Integer,TransactionOutput>>();
@@ -85,7 +87,7 @@ public class Bitcoin {
 
 		byte[] coinbase = new byte[40];
 		// fill in the number of inputs, which is 0 because its a coinbase transaction
-		ByteBuffer countBB = ByteBuffer.allocate(0);
+		ByteBuffer countBB = ByteBuffer.allocate(2);
 		countBB.order(ByteOrder.LITTLE_ENDIAN);
 		countBB.putShort((short)0);
 		System.arraycopy(countBB, 0, coinbase, 0, 2);
@@ -173,8 +175,10 @@ public class Bitcoin {
 	public static int processTransaction(int startIndex) throws IOException, InvalidKeyException {
 		// will change to false if the tx being processed is found to be invalid
 		boolean valid = true;
-		// 
+		// loooks to be a mapping from tx name to indexes of output specifiers within this tx
+		// that have been used as input specifiers
 		Map<String,Set<Integer>> changedMap = new HashMap<String,Set<Integer>>();
+		// a map from hashed public keys to signatures
 		Map<String,String> signatureMap = new HashMap<String,String>();
 		ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
 
@@ -232,8 +236,10 @@ public class Bitcoin {
 			if(transactions.containsKey(prevTxRef)) {
 				//Transaction prev = transactions.get(s1);
 				//Map<Integer,TransactionOutput> outputs = prev.getOutputMap();
+
 				// a map from indexes to output specifiers and a flag indicating if it has been used yet
 				Map<Integer,TransactionOutput> outputs2 = transactions.get(prevTxRef);
+				// 
 				if(!changedMap.containsKey(prevTxRef)) {
 					changedMap.put(prevTxRef,new HashSet<Integer>());
 				}
@@ -241,11 +247,15 @@ public class Bitcoin {
 					// get the output spcecifier
 					TransactionOutput output = outputs2.get(index);
 					if(!output.isUsed()) {
+						// compute the dHash of the public key supplied in the input specifier.
 						String hashedInputKey = dHash(inputKey);
 						// check that that hashed public key in the referenced output specifier matches
-						// the hashed public key in input specifier
+						// the hashed public key in the input specifier. Tx is invalid if they do not match
 						if(hashedInputKey.equals(output.getKey())) {
+							// add the mapping from the hashed public key of the output referenced in the input to the
+							// signature of the transaction
 							signatureMap.put(output.getKey(),signature);
+							// add this index to the mapping from transaction names to indexes of output specifiers referenced
 							changedMap.get(prevTxRef).add(index);
 							int value = output.getValue();
 							// transaction is valid so far, so increment its total value
@@ -267,15 +277,19 @@ public class Bitcoin {
 				valid = false;
 			}
 		}
+		// now parsing the output specifiers
 		int outputStart = currentIndex;
 		ByteBuffer numOutputsBB = ByteBuffer.allocate(2);
+		// get the number of entries
 		numOutputsBB.order(ByteOrder.LITTLE_ENDIAN);
 		numOutputsBB.put(binaryData,currentIndex,2);
 		int outputs = numOutputsBB.getShort(0);
 		System.out.println("Num Outputs: " + outputs);
 		currentIndex += 2;
 		int totalOutputValue = 0;
+		// a map from index to TransactionOutput, which stores the amount and the hashed public key of the recipient
 		Map<Integer,TransactionOutput> outputMap = new HashMap<Integer,TransactionOutput>();
+		// parse the outputs
 		for(int i = 0; i < outputs; i++) {
 			ByteBuffer outputValueBB = ByteBuffer.allocate(4);
 			outputValueBB.order(ByteOrder.LITTLE_ENDIAN);
@@ -299,18 +313,20 @@ public class Bitcoin {
 		if (totalOutputValue < totalInputValue) {
 			txFee += totalInputValue - totalOutputValue;
 		}
+
 		outputStream.write(getBytes(binaryData,outputStart,currentIndex));
 		String transactionHash = dHash(getBytes(binaryData,startIndex,currentIndex));
-		Transaction current = new Transaction(transactionHash);
-		current.setOutputMap(outputMap);
 		//transactions.put(transactionHash,current);
-		
-		if(valid) {
-			
+		// should we break before getting here? if it's invalid then we're done with it 
+		if (valid) {
+			balancesMap.put(transactionHash,totalOutputValue);
 			byte[] transactionBytes = outputStream.toByteArray();
 			String newHash = dHash(transactionBytes);
-			/*
+			
 			for(String key: signatureMap.keySet()) {
+				// we need to decrypt the signature field of each input specifier using the supplied
+				// public key and make sure that the data equals the dHash of the the entire transaction
+				// minus the signature fields.
 				String signature = signatureMap.get(key);
 				byte[] keyBytes = key.getBytes();
 				SecretKeySpec privateKey = new SecretKeySpec(keyBytes, "RSA/ECB/PKCS1Padding");
@@ -320,7 +336,7 @@ public class Bitcoin {
 				System.out.println(newSignature);
 				System.out.println(signature);
 			}
-			*/
+			
 			validTransactions++;
 			transactionList.add(getBytes(binaryData,startIndex,currentIndex));
 			transactions.put(transactionHash, outputMap);

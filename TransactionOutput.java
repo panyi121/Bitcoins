@@ -1,9 +1,11 @@
 
 
 public class TransactionOutput {
-
+	// amount. not to be confused with key as in key-value pair
 	private int value;
+	// hashed public key.
 	private String key;
+	// true if a transaction has referenced this output
 	private boolean used;
 	
 	public TransactionOutput(int value, String key) {
