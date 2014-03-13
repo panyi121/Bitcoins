@@ -80,12 +80,13 @@ public class Bitcoin {
 		int numTransactions = numTransactionsBB.getInt(0);
 		System.out.println("numTransactions: " + numTransactions+"\n");
 		int currentIndex = 130;
+//		for(int i = 0; i < 10; i++) {
 		for(int i = 0; i < numTransactions; i++) {
 			System.out.println(i+1);
 			currentIndex = processTransaction(currentIndex);
 		}
-		System.out.println(invalidTransactions);
-		System.out.println(validTransactions);
+		System.out.println("invalid transactions: " + invalidTransactions);
+		System.out.println("valid transactions" + validTransactions);
 		System.out.println("transaction fee total: " + txFee);
 
 		// Create block 1 header
@@ -171,14 +172,12 @@ public class Bitcoin {
 		System.out.println("found a nonce: " + nonce);
 		
 		for(String s: balancesMap.keySet()) {
-			
 			PrintWriter writer = new PrintWriter("balances.txt", "UTF-8");
 			writer.println("Key: " + s);
 			writer.println("Balance: " + balancesMap.get(s));
 			writer.println();
 			writer.close();
 		}
-		
 	}
 
 	public static boolean isAllZeros(byte[] input) {
@@ -220,18 +219,18 @@ public class Bitcoin {
 		 */
 		for(int i = 0; i < inputs; i++) {
 			int inputStart = currentIndex;
-			//System.out.println("Input:" + i+1);
+			System.out.println("\tInput:" + (i+1));
 			// get the name of the previous transaction this one references
 			byte[] prevTransBytes = getBytes(binaryData,currentIndex,currentIndex+32);
 			currentIndex +=32;
 			String prevTxRef = bytesToHex(prevTransBytes);
-			//System.out.println("Prev Trans Hash : " + prevTxRef);
+			System.out.println("\tPrev Trans Hash : " + prevTxRef);
 			// get the index of the output specifier in the referenced transaction
 			ByteBuffer indexBB = ByteBuffer.allocate(2);
 			indexBB.order(ByteOrder.LITTLE_ENDIAN);
 			indexBB.put(binaryData,currentIndex,2);
 			int index = indexBB.getShort(0);
-		//	System.out.println("Prev Trans index: " + index);
+			System.out.println("\tPrev Trans index: " + index);
 			currentIndex += 2;
 			// get the signature of this transaction
 			int signatureStart = currentIndex;
@@ -243,7 +242,7 @@ public class Bitcoin {
 			lengthBB.order(ByteOrder.LITTLE_ENDIAN);
 			lengthBB.put(binaryData,currentIndex,2);
 			int length = lengthBB.getShort(0);
-			//System.out.println("Public key length: " + length);
+			System.out.println("\tPublic key length: " + length);
 			currentIndex+=2;
 			// get the public key bytes
 			byte[] inputKey = getBytes(binaryData,currentIndex,currentIndex+length);
@@ -252,56 +251,56 @@ public class Bitcoin {
 			// write the entire input specifier minus the signature field
 			outputStream.write(getBytes(binaryData,inputStart,signatureStart));
 			outputStream.write(getBytes(binaryData,signatureEnd,inputEnd));
-			
-			if(transactions.containsKey(prevTxRef)) {
-				//Transaction prev = transactions.get(s1);
-				//Map<Integer,TransactionOutput> outputs = prev.getOutputMap();
+			if (valid) {
+				// only perform these checks if the transaction is valid so far. Otherwise we just
+				// need to keep looping to figure out where the next tx starts
+				if(transactions.containsKey(prevTxRef)) {
+					// a map from indexes to output specifiers and a flag indicating if it has been used yet
+					Map<Integer,TransactionOutput> outputs2 = transactions.get(prevTxRef);
+					// 
+					if(!changedMap.containsKey(prevTxRef)) {
+						changedMap.put(prevTxRef,new HashSet<Integer>());
+					}
+					if(outputs2.containsKey(index)) {
+						// get the output spcecifier
+						TransactionOutput output = outputs2.get(index);
+						if(!output.isUsed()) {
+							// compute the dHash of the public key supplied in the input specifier.
+							String hashedInputKey = dHash(inputKey);
+							// check that that hashed public key in the referenced output specifier matches
+							// the hashed public key in the input specifier. Tx is invalid if they do not match
+							if(hashedInputKey.equals(output.getKey())) {
+								// add the mapping from the UNHASHED public key of the output referenced in the input to the
+								// signature of the transaction
+								signatureMap.put(new String(inputKey),signature);
+								// add this index to the mapping from transaction names to indexes of output specifiers referenced
+								changedMap.get(prevTxRef).add(index);
+								int value = output.getValue();
+								// transaction is valid so far, so increment its total value
+								totalInputValue += value;
 
-				// a map from indexes to output specifiers and a flag indicating if it has been used yet
-				Map<Integer,TransactionOutput> outputs2 = transactions.get(prevTxRef);
-				// 
-				if(!changedMap.containsKey(prevTxRef)) {
-					changedMap.put(prevTxRef,new HashSet<Integer>());
-				}
-				if(outputs2.containsKey(index)) {
-					// get the output spcecifier
-					TransactionOutput output = outputs2.get(index);
-					if(!output.isUsed()) {
-						// compute the dHash of the public key supplied in the input specifier.
-						String hashedInputKey = dHash(inputKey);
-						// check that that hashed public key in the referenced output specifier matches
-						// the hashed public key in the input specifier. Tx is invalid if they do not match
-						if(hashedInputKey.equals(output.getKey())) {
-							// add the mapping from the UNHASHED public key of the output referenced in the input to the
-							// signature of the transaction
-							signatureMap.put(new String(inputKey),signature);
-							// add this index to the mapping from transaction names to indexes of output specifiers referenced
-							changedMap.get(prevTxRef).add(index);
-							int value = output.getValue();
-							// transaction is valid so far, so increment its total value
-							totalInputValue += value;
-							
-							//subtract value from key's balance
-							if(!tempBalancesMap.containsKey(hashedInputKey)) {
-								tempBalancesMap.put(hashedInputKey,0-value);
+								//subtract value from key's balance
+								if(!tempBalancesMap.containsKey(hashedInputKey)) {
+									tempBalancesMap.put(hashedInputKey,0-value);
+								} else {
+									tempBalancesMap.put(hashedInputKey,tempBalancesMap.get(hashedInputKey)-value);
+								}
 							} else {
-								tempBalancesMap.put(hashedInputKey,tempBalancesMap.get(hashedInputKey)-value);
+								System.out.println("\tTransaction invalid: Hashed input key does not equal hashed output key");
+								valid = false;
 							}
-						} else {
-							System.out.println("Transaction invalid: Hashed input key does not equal hashed output key");
+						} else { 
+							System.out.println("\tTransaction invalid: Output already used before");
 							valid = false;
 						}
-					} else { 
-						System.out.println("Transaction invalid: Output already used before, write code to deal with this");
+					} else {
+						System.out.println("\tTransaction invalid: Index not found in transaction's output map");
 						valid = false;
 					}
 				} else {
-					System.out.println("Transaction invalid: Index not found in transaction's output map, write code to deal with this");
+					System.out.println("\tTransaction invalid: Key not found");
 					valid = false;
 				}
-			} else {
-				System.out.println("Transaction invalid: Key not found, write code to deal with this");
-				valid = false;
 			}
 		}
 		// now parsing the output specifiers
@@ -311,7 +310,7 @@ public class Bitcoin {
 		numOutputsBB.order(ByteOrder.LITTLE_ENDIAN);
 		numOutputsBB.put(binaryData,currentIndex,2);
 		int outputs = numOutputsBB.getShort(0);
-		//System.out.println("Num Outputs: " + outputs);
+		System.out.println("\t\tNum Outputs: " + outputs);
 		currentIndex += 2;
 		int totalOutputValue = 0;
 		// a map from index to TransactionOutput, which stores the amount and the hashed public key of the recipient
@@ -322,12 +321,13 @@ public class Bitcoin {
 			outputValueBB.order(ByteOrder.LITTLE_ENDIAN);
 			outputValueBB.put(binaryData,currentIndex,4);
 			int outputValue = outputValueBB.getInt(0);
-			//System.out.println("Output Value: " + outputValue);
+			System.out.println("\t\tOutput Value: " + outputValue);
 			currentIndex += 4;
 			totalOutputValue += outputValue;
 			byte[] hashedPublicKeyBytes = getBytes(binaryData,currentIndex,currentIndex+32);
 			currentIndex +=32;
 			String hexKey = bytesToHex(hashedPublicKeyBytes);
+			System.out.println("\t\tRecipient's dHashed public key: " + hexKey);
 			TransactionOutput output = new TransactionOutput(outputValue,hexKey);
 			outputMap.put(i,output);
 			//subtract value from key's balance
@@ -336,95 +336,84 @@ public class Bitcoin {
 			} else {
 				tempBalancesMap.put(hexKey,tempBalancesMap.get(hexKey)+outputValue);
 			}
-			
 		}
-		System.out.println(" Total Input Value: " + totalInputValue + " Total output value: " + totalOutputValue);
-		if(totalOutputValue > totalInputValue) {
-			System.out.println("Transaction invalid: Output value > input value, write code to deal with this");
-			valid = false;
-		} 
-		// increment the transaction fee
-		if (totalOutputValue < totalInputValue) {
-			txFee += totalInputValue - totalOutputValue;
-		}
-
-		outputStream.write(getBytes(binaryData,outputStart,currentIndex));
-		String transactionHash = dHash(getBytes(binaryData,startIndex,currentIndex));
-		//transactions.put(transactionHash,current);
-		// should we break before getting here? if it's invalid then we're done with it 
 		if (valid) {
-			byte[] transactionBytes = outputStream.toByteArray();
-			String newHash = dHash(transactionBytes);
-			
-			for(String key: signatureMap.keySet()) {
-				// we need to decrypt the signature field of each input specifier using the supplied
-				// public key and make sure that the data equals the dHash of the the entire transaction
-				// minus the signature fields.
-				byte[] signature = signatureMap.get(key);
-				System.out.println("signature length: " + signature.length);
-				System.out.println(key);
-				RSAPublicKey publicKey = getKey(key);
-				aes.init(Cipher.DECRYPT_MODE, publicKey);
-				// this should be the dHash of the entire tx
-				byte[] plaintext = aes.doFinal(signature);
-				System.out.println("decrypted signature: " + bytesToHex(plaintext));
-				System.out.println("dHash of tx: " + newHash);
-				
-				if (!newHash.equals(bytesToHex(plaintext))) {
-
-					invalidTransactions++;
-					valid = false;
-					break;
-				}
-				
-			}
+			outputStream.write(getBytes(binaryData,outputStart,currentIndex));
+			String transactionHash = dHash(getBytes(binaryData,startIndex,currentIndex));
+			System.out.println("\t\tTotal Input Value: " + totalInputValue + " Total output value: " + totalOutputValue);
+			// increment the transaction fee
+			if (totalOutputValue < totalInputValue) {
+				txFee += totalInputValue - totalOutputValue;
+			} else if (totalOutputValue > totalInputValue) {
+				System.out.println("\t\tTransaction invalid: Output value > input value, write code to deal with this");
+				valid = false;
+			} 
 			if (valid) {
-				System.out.println("transaction valid");
-				for(String hexKey: tempBalancesMap.keySet()) {
-					if(!balancesMap.containsKey(hexKey)) {
-						balancesMap.put(hexKey,tempBalancesMap.get(hexKey));
-					} else {
-						balancesMap.put(hexKey,balancesMap.get(hexKey)+tempBalancesMap.get(hexKey));
+				byte[] transactionBytes = outputStream.toByteArray();
+				String newHash = dHash(transactionBytes);
+
+				for(String key: signatureMap.keySet()) {
+					System.out.println(signatureMap.size());
+					// we need to decrypt the signature field of each input specifier using the supplied
+					// public key and make sure that the data equals the dHash of the the entire transaction
+					// minus the signature fields.
+					byte[] signature = signatureMap.get(key);
+					RSAPublicKey publicKey = getKey(key);
+					aes.init(Cipher.DECRYPT_MODE, publicKey);
+					// this should be the dHash of the entire tx
+					byte[] plaintext = aes.doFinal(signature);
+					System.out.println("\t\t\tdecrypted signature: " + bytesToHex(plaintext));
+					System.out.println("\t\t\tdHash of tx:\t " + newHash);
+					System.out.print("\t\t\t" + key);
+					if (!newHash.equals(bytesToHex(plaintext))) {
+						System.out.println("\t\t\tTransaction invalid: signature not produced with private key corresponding to public key");
+						valid = false;
 					}
 				}
-
-				validTransactions++;
-				transactionList.add(getBytes(binaryData,startIndex,currentIndex));
-				transactions.put(transactionHash, outputMap);
-				for(String s: changedMap.keySet()) {
-					Set<Integer> indexSet = changedMap.get(s);
-					for(Integer i: indexSet) {
-						transactions.get(s).get(i).setUsed(true);
+				if (valid) {
+					for(String hexKey: tempBalancesMap.keySet()) {
+						if(!balancesMap.containsKey(hexKey)) {
+							balancesMap.put(hexKey,tempBalancesMap.get(hexKey));
+						} else {
+							balancesMap.put(hexKey,balancesMap.get(hexKey)+tempBalancesMap.get(hexKey));
+						}
+					}
+					transactionList.add(getBytes(binaryData,startIndex,currentIndex));
+					transactions.put(transactionHash, outputMap);
+					for(String s: changedMap.keySet()) {
+						Set<Integer> indexSet = changedMap.get(s);
+						for(Integer i: indexSet) {
+							transactions.get(s).get(i).setUsed(true);
+						}
 					}
 				}
 			}
+		} 
+		if (valid) {
+			validTransactions++;
 		} else {
 			invalidTransactions++;
+			System.exit(1);
 		}
+		System.out.println("TRANSACTION VALID: " + valid);
+		System.out.println();
 		return currentIndex;
 	}
-	   public static RSAPublicKey getKey(String key) throws Exception {
-		      Object o;
-		      PEMParser pemRd = openPEMResource(key);
-		      RSAPublicKey myKey = null;
-		      while ((o = pemRd.readObject()) != null) {
-		         if (o instanceof SubjectPublicKeyInfo) {
-		            JcaPEMKeyConverter myConverter = new JcaPEMKeyConverter();
-		            myKey = (RSAPublicKey) myConverter.getPublicKey((SubjectPublicKeyInfo) o);
-		            /*
-		            BigInteger exponent = myKey.getPublicExponent();
-		            BigInteger modulus = myKey.getModulus();
-		            System.out.println("Exponent:");
-		            System.out.println(exponent);
-		            System.out.println("Modulus:");
-		            System.out.println(modulus);
-		            */
-		         } else {
-		            System.out.println("Not an instance of SubjectPublicKeyInfo.");
-		         }
-		      }
-		      return myKey;
-		   }
+
+	public static RSAPublicKey getKey(String key) throws Exception {
+		Object o;
+		PEMParser pemRd = openPEMResource(key);
+		RSAPublicKey myKey = null;
+		while ((o = pemRd.readObject()) != null) {
+			if (o instanceof SubjectPublicKeyInfo) {
+				JcaPEMKeyConverter myConverter = new JcaPEMKeyConverter();
+				myKey = (RSAPublicKey) myConverter.getPublicKey((SubjectPublicKeyInfo) o);
+			} else {
+				System.out.println("Not an instance of SubjectPublicKeyInfo.");
+			}
+		}
+		return myKey;
+	}
 
 	private static PEMParser openPEMResource(String key) throws FileNotFoundException {
 		Reader fRd = new BufferedReader(new InputStreamReader(new ByteArrayInputStream(key.getBytes())));
