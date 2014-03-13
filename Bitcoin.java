@@ -1,5 +1,11 @@
+import java.io.BufferedReader;
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.io.InputStreamReader;
+import java.io.Reader;
+import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.file.Files;
@@ -8,6 +14,7 @@ import java.nio.file.Paths;
 import java.security.InvalidKeyException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.security.interfaces.RSAPublicKey;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedList;
@@ -17,7 +24,10 @@ import java.util.Set;
 
 import javax.crypto.Cipher;
 import javax.crypto.NoSuchPaddingException;
-import javax.crypto.spec.SecretKeySpec;
+
+import org.bouncycastle.asn1.x509.SubjectPublicKeyInfo;
+import org.bouncycastle.openssl.PEMParser;
+import org.bouncycastle.openssl.jcajce.JcaPEMKeyConverter;
 
 public class Bitcoin {
 	
@@ -41,7 +51,7 @@ public class Bitcoin {
 	
 	private static int txFee;
 	
-	public static void main(String[] args) throws IOException, InvalidKeyException {
+	public static void main(String[] args) throws Exception {
 		txFee = 0;
 	    binaryData = null;
 	    balancesMap = new HashMap<String,Integer>();
@@ -172,7 +182,7 @@ public class Bitcoin {
 		return true;
 	}
 	
-	public static int processTransaction(int startIndex) throws IOException, InvalidKeyException {
+	public static int processTransaction(int startIndex) throws Exception {
 		// will change to false if the tx being processed is found to be invalid
 		boolean valid = true;
 		// loooks to be a mapping from tx name to indexes of output specifiers within this tx
@@ -328,13 +338,13 @@ public class Bitcoin {
 				// public key and make sure that the data equals the dHash of the the entire transaction
 				// minus the signature fields.
 				String signature = signatureMap.get(key);
-				byte[] keyBytes = key.getBytes();
-				SecretKeySpec privateKey = new SecretKeySpec(keyBytes, "RSA/ECB/PKCS1Padding");
-				aes.init(Cipher.ENCRYPT_MODE, privateKey);
-				byte[] encrypted= new byte[aes.getOutputSize(128)];
-				String newSignature = bytesToHex(encrypted);
-				System.out.println(newSignature);
-				System.out.println(signature);
+				System.out.println(key);
+				RSAPublicKey publicKey = getKey(key);
+				aes.init(Cipher.DECRYPT_MODE, publicKey);
+				// this should be the dHash of the entire tx
+				byte[] plaintext = aes.doFinal(signature.getBytes());
+				System.out.println("plaintext: " + bytesToHex(plaintext));
+				System.out.println("dHash of tx: " + transactionHash);
 			}
 			
 			validTransactions++;
@@ -350,6 +360,33 @@ public class Bitcoin {
 			invalidTransactions++;
 		}
 		return currentIndex;
+	}
+	   public static RSAPublicKey getKey(String key) throws Exception {
+		      Object o;
+		      PEMParser pemRd = openPEMResource(key);
+		      RSAPublicKey myKey = null;
+		      while ((o = pemRd.readObject()) != null) {
+		         if (o instanceof SubjectPublicKeyInfo) {
+		            JcaPEMKeyConverter myConverter = new JcaPEMKeyConverter();
+		            myKey = (RSAPublicKey) myConverter.getPublicKey((SubjectPublicKeyInfo) o);
+		            /*
+		            BigInteger exponent = myKey.getPublicExponent();
+		            BigInteger modulus = myKey.getModulus();
+		            System.out.println("Exponent:");
+		            System.out.println(exponent);
+		            System.out.println("Modulus:");
+		            System.out.println(modulus);
+		            */
+		         } else {
+		            System.out.println("Not an instance of SubjectPublicKeyInfo.");
+		         }
+		      }
+		      return myKey;
+		   }
+
+	private static PEMParser openPEMResource(String key) throws FileNotFoundException {
+		Reader fRd = new BufferedReader(new InputStreamReader(new ByteArrayInputStream(key.getBytes())));
+		return new PEMParser(fRd);
 	}
 
 	public static String dHash(byte[] bytes) {
