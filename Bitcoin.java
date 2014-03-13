@@ -1,5 +1,4 @@
 import java.io.ByteArrayOutputStream;
-import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -9,9 +8,9 @@ import java.nio.file.Paths;
 import java.security.InvalidKeyException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -28,7 +27,7 @@ public class Bitcoin {
 	private static int validTransactions;
 	private static List<byte[]> transactionList;
 	private static String genesisBlockName;
-	
+	private static byte[] dHashOfGenesisBlock;
 	private static Map<String,Map<Integer,TransactionOutput>> transactions;
 	public static final int DIFFICULTY = 3;
 
@@ -39,12 +38,15 @@ public class Bitcoin {
 									 "-----END RSA PUBLIC KEY-----";
 	private static String identityBytes = "1f5a0200bc94ae4264642855786d9c2bb436b9e129ef95e6416136c03f339581";
 	
+	private static int txFee;
+	
 	public static void main(String[] args) throws IOException, InvalidKeyException {
+		txFee = 0;
 	    binaryData = null;
 	    invalidTransactions = 0;
 	    validTransactions = 0;
 		transactions = new HashMap<String,Map<Integer,TransactionOutput>>();
-		transactionList = new ArrayList<byte[]>();
+		transactionList = new LinkedList<byte[]>();
 		try {
 			Path path = Paths.get("./src/transactionData-10000-3.bin");
 			binaryData = Files.readAllBytes(path);
@@ -70,14 +72,43 @@ public class Bitcoin {
 		for(int i = 0; i < numTransactions; i++) {
 			System.out.println(i+1);
 			currentIndex = processTransaction(currentIndex);
-			
 		}
 		System.out.println(invalidTransactions);
 		System.out.println(validTransactions);
-		
-		// now we calculate the merkle root
+		System.out.println("transaction fee total: " + txFee);
+
+		// Create block 1 header
+		// before we calculate the merkle root we have to create the coinbase
+		// transaction that gives us 10 bitcoins + tx fees because this is the first data item
+		// used as input for the merkle root calculation
+		// create a coinbase transaction.
+
+		byte[] coinbase = new byte[40];
+		// fill in the number of inputs, which is 0 because its a coinbase transaction
+		ByteBuffer countBB = ByteBuffer.allocate(0);
+		countBB.order(ByteOrder.LITTLE_ENDIAN);
+		countBB.putShort((short)0);
+		System.arraycopy(countBB, 0, coinbase, 0, 2);
+		// fill in the number of outputs which is 1
+		countBB.putShort(0, (short) 1);
+		System.arraycopy(countBB, 0, coinbase, 2, 2);
+		// fill in the value of this transaction, which is 10 + tx fees.
+		// TODO INCLUDE TX FEES!!!!!
+		ByteBuffer valBB = ByteBuffer.allocate(4);
+		valBB.order(ByteOrder.LITTLE_ENDIAN);
+		valBB.putInt(10);
+		System.arraycopy(valBB, 0, coinbase, 4, 4);
+		// calculate the dHash of our public key
+		String pubkey = "-----BEGIN RSA PUBLIC KEY-----\nMIGJAoGBAN3MxXHcbc1VNKTOgdm7W+i/dVnjv8vYGlbkdaTKzYgi8rQm126Sri87\n702UBNzmkkZyKbRKL/Bfc4EG8/Mt9Pd2xQlRyXCL9FnIFWHyhfIQtW+oBsGI5UhG\nI8B8MiPOMfb6d/PdK+vd4riUxHAvCkHW5Lw0szAD1RVGbkG/7qnzAgMBAAE=\n-----END RSA PUBLIC KEY-----";
 		Merkle m = new Merkle();
+		byte[] hashedPubKey = m.dHash(pubkey.getBytes());
+		// put it in the coinbase tx
+		System.arraycopy(hashedPubKey, 0, coinbase, 8, hashedPubKey.length);
+		// now put this at the front of the list of transactions so we can calculate the merkle root
+		transactionList.add(0, hashedPubKey);
+		// now we calculate the merkle root. 
 		byte[] merkleRoot = m.calcMerkleRoot(transactionList);
+
 		// build the header using the merkle root and start testing nonces
 		byte[] header = new byte[82];
 		// put the version number in the first 4 bytes
@@ -86,11 +117,10 @@ public class Bitcoin {
 		versionBB.putInt(1);
 		byte[] versionBytes = versionBB.array();
 		System.arraycopy(versionBytes, 0, header, 0, versionBytes.length);
-		// copy in the genesis block name
-		byte[] genesisNameBytes = genesisBlockName.getBytes();
-		System.arraycopy(genesisNameBytes, 0, header, 4, genesisNameBytes.length);
+		// copy in the genesis block name (its dHash value)
+		System.arraycopy(dHashOfGenesisBlock, 0, header, 4, dHashOfGenesisBlock.length);
 		// copy in the merkle root bytes
-		System.arraycopy(merkleRoot, 0, header, 4, merkleRoot.length);
+		System.arraycopy(merkleRoot, 0, header, 36, merkleRoot.length);
 		// copy in the difficulty
 		ByteBuffer difficultyBB = ByteBuffer.allocate(2);
 		difficultyBB.order(ByteOrder.LITTLE_ENDIAN);
@@ -111,36 +141,23 @@ public class Bitcoin {
 			timeBB.order(ByteOrder.LITTLE_ENDIAN);
 			timeBB.putInt(timeInSeconds);
 			byte[] timeBytes = timeBB.array();
-			// copy the time into the header
-			System.arraycopy(timeBytes, 0, header, 68, timeBytes.length);
 
+			// copy the time into the block header
+			System.arraycopy(timeBytes, 0, header, 68, timeBytes.length);
 			// copy the nonce into the header
 			ByteBuffer nonceBB = ByteBuffer.allocate(8);
 			nonceBB.order(ByteOrder.LITTLE_ENDIAN);
 			nonceBB.putLong(nonce);
 			byte[] nonceBytes = nonceBB.array();
 			System.arraycopy(nonceBytes, 0, header, 74, nonceBytes.length);
-			
+
 			byte[] hash = m.dHash(header);
 			System.arraycopy(hash, hash.length - DIFFICULTY, first24bits, 0, DIFFICULTY);
 			nonce++;
-		} while (!isAllZeros(first24bits)); /* while the  */
-		// we've found a nonce that works so we can add the block header
+		} while (!isAllZeros(first24bits)); 
+
+		// we've found a nonce that works so we can build the output file then we are done
 		System.out.println("found a nonce: " + nonce);
-
-		// create a coinbase transaction.
-		byte[] coinbase = new byte[40];
-		// fill in the number of inputs, which is 0 because its a coinbase transaction
-		ByteBuffer countBB = ByteBuffer.allocate(0);
-		countBB.order(ByteOrder.LITTLE_ENDIAN);
-		countBB.putShort((short)0);
-		System.arraycopy(countBB, 0, coinbase, 0, 2);
-		// fill in the number of outputs which is 1
-		countBB.putShort(0, (short) 0);
-
-		String pubkey = "-----BEGIN RSA PUBLIC KEY-----\nMIGJAoGBAN3MxXHcbc1VNKTOgdm7W+i/dVnjv8vYGlbkdaTKzYgi8rQm126Sri87\n702UBNzmkkZyKbRKL/Bfc4EG8/Mt9Pd2xQlRyXCL9FnIFWHyhfIQtW+oBsGI5UhG\nI8B8MiPOMfb6d/PdK+vd4riUxHAvCkHW5Lw0szAD1RVGbkG/7qnzAgMBAAE=\n-----END RSA PUBLIC KEY-----";
-		// dHash it
-		byte[] hashedPubKey = m.dHash(pubkey.getBytes());
 		
 	}
 
@@ -154,12 +171,15 @@ public class Bitcoin {
 	}
 	
 	public static int processTransaction(int startIndex) throws IOException, InvalidKeyException {
+		// will change to false if the tx being processed is found to be invalid
 		boolean valid = true;
+		// 
 		Map<String,Set<Integer>> changedMap = new HashMap<String,Set<Integer>>();
 		Map<String,String> signatureMap = new HashMap<String,String>();
 		ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
-		
+
 		int currentIndex = startIndex;
+
 		ByteBuffer numInputsBB = ByteBuffer.allocate(2);
 		numInputsBB.order(ByteOrder.LITTLE_ENDIAN);
 		numInputsBB.put(binaryData,currentIndex,2);
@@ -168,51 +188,67 @@ public class Bitcoin {
 		currentIndex += 2;
 		int totalInputValue = 0;
 		outputStream.write(getBytes(binaryData,0,2));
-		
+		/* iterate through the inputs and make sure that they:
+		 * 1. all transactions referenced exist
+		 * 2. the outputs referenced in the input specifiers actually exist (index exists)
+		 * 3.
+		 * 4.
+		 */
 		for(int i = 0; i < inputs; i++) {
-			int inputStart=currentIndex;
+			int inputStart = currentIndex;
 			System.out.println("Input:" + i+1);
+			// get the name of the previous transaction this one references
 			byte[] prevTransBytes = getBytes(binaryData,currentIndex,currentIndex+32);
 			currentIndex +=32;
-			String s1 = bytesToHex(prevTransBytes);
-			System.out.println("Prev Trans Hash : " + s1);
+			String prevTxRef = bytesToHex(prevTransBytes);
+			System.out.println("Prev Trans Hash : " + prevTxRef);
+			// get the index of the output specifier in the referenced transaction
 			ByteBuffer indexBB = ByteBuffer.allocate(2);
 			indexBB.order(ByteOrder.LITTLE_ENDIAN);
 			indexBB.put(binaryData,currentIndex,2);
 			int index = indexBB.getShort(0);
 			System.out.println("Prev Trans index: " + index);
 			currentIndex += 2;
+			// get the signature of this transaction
 			int signatureStart = currentIndex;
 			String signature = bytesToHex(getBytes(binaryData,currentIndex,currentIndex+128));
 			currentIndex += 128;
 			int signatureEnd = currentIndex;
+			// get the length of the public key
 			ByteBuffer lengthBB = ByteBuffer.allocate(2);
 			lengthBB.order(ByteOrder.LITTLE_ENDIAN);
 			lengthBB.put(binaryData,currentIndex,2);
 			int length = lengthBB.getShort(0);
 			System.out.println("Public key length: " + length);
 			currentIndex+=2;
+			// get the public key bytes
 			byte[] inputKey = getBytes(binaryData,currentIndex,currentIndex+length);
 			currentIndex+=length;
 			int inputEnd = currentIndex;
+			// write the entire input specifier minus the signature field
 			outputStream.write(getBytes(binaryData,inputStart,signatureStart));
 			outputStream.write(getBytes(binaryData,signatureEnd,inputEnd));
 			
-			if(transactions.containsKey(s1)) {
+			if(transactions.containsKey(prevTxRef)) {
 				//Transaction prev = transactions.get(s1);
 				//Map<Integer,TransactionOutput> outputs = prev.getOutputMap();
-				Map<Integer,TransactionOutput> outputs2 = transactions.get(s1);
-				if(!changedMap.containsKey(s1)) {
-					changedMap.put(s1,new HashSet<Integer>());
+				// a map from indexes to output specifiers and a flag indicating if it has been used yet
+				Map<Integer,TransactionOutput> outputs2 = transactions.get(prevTxRef);
+				if(!changedMap.containsKey(prevTxRef)) {
+					changedMap.put(prevTxRef,new HashSet<Integer>());
 				}
 				if(outputs2.containsKey(index)) {
+					// get the output spcecifier
 					TransactionOutput output = outputs2.get(index);
 					if(!output.isUsed()) {
 						String hashedInputKey = dHash(inputKey);
+						// check that that hashed public key in the referenced output specifier matches
+						// the hashed public key in input specifier
 						if(hashedInputKey.equals(output.getKey())) {
 							signatureMap.put(output.getKey(),signature);
-							changedMap.get(s1).add(index);
+							changedMap.get(prevTxRef).add(index);
 							int value = output.getValue();
+							// transaction is valid so far, so increment its total value
 							totalInputValue += value;
 						} else {
 							System.out.println("Transaction invalid: Hashed input key does not equal hashed output key");
@@ -258,6 +294,10 @@ public class Bitcoin {
 		if(totalOutputValue > totalInputValue) {
 			System.out.println("Transaction invalid: Output value > input value, write code to deal with this");
 			valid = false;
+		} 
+		// increment the transaction fee
+		if (totalOutputValue < totalInputValue) {
+			txFee += totalInputValue - totalOutputValue;
 		}
 		outputStream.write(getBytes(binaryData,outputStart,currentIndex));
 		String transactionHash = dHash(getBytes(binaryData,startIndex,currentIndex));
@@ -269,6 +309,7 @@ public class Bitcoin {
 			
 			byte[] transactionBytes = outputStream.toByteArray();
 			String newHash = dHash(transactionBytes);
+			/*
 			for(String key: signatureMap.keySet()) {
 				String signature = signatureMap.get(key);
 				byte[] keyBytes = key.getBytes();
@@ -279,6 +320,7 @@ public class Bitcoin {
 				System.out.println(newSignature);
 				System.out.println(signature);
 			}
+			*/
 			validTransactions++;
 			transactionList.add(getBytes(binaryData,startIndex,currentIndex));
 			transactions.put(transactionHash, outputMap);
@@ -314,6 +356,14 @@ public class Bitcoin {
 	}
 	
 	public static void parseGenesis() {
+		// set the field for the hash of the genesis block to the hash of the entire genesis block
+		// this is used for creating the next block header
+		byte[] genBlock = new byte[82];
+		System.arraycopy(binaryData, 0, genBlock, 0, genBlock.length);
+		Merkle m = new Merkle();
+		dHashOfGenesisBlock = m.dHash(genBlock);
+		System.out.println("Block: dHash (name) = " + dHash(genBlock));
+		
 		// get the version number
 		ByteBuffer versionBB = ByteBuffer.allocate(4);
 		versionBB.order(ByteOrder.LITTLE_ENDIAN);
@@ -325,11 +375,10 @@ public class Bitcoin {
 		String s1 = bytesToHex(prevBlockBytes);
 		System.out.println("Prev Block Hash : " + s1);
 	
-		// 
+		// get the merkle root
 		byte[] merkleBytes = getBytes(binaryData,36,68);
 		String s2 = bytesToHex(merkleBytes);
 		System.out.println("Merkle : " + s2);
-		genesisBlockName = s2;
 		
 		// get the creation time
 		ByteBuffer creationTimeBB = ByteBuffer.allocate(4);
@@ -382,11 +431,12 @@ public class Bitcoin {
 		
 		TransactionOutput genesisOutput = new TransactionOutput(valueBB.getInt(0),s3);
 		
-		Transaction genesis = new Transaction(s2);
-		Map<Integer,TransactionOutput> genesisOutputMap = genesis.getOutputMap();
+
+		Map<Integer, TransactionOutput> genesisOutputMap= new HashMap<Integer,TransactionOutput>();
 		genesisOutputMap.put(0, genesisOutput);
 
 		transactions.put(s2,genesisOutputMap);
+		// should this be included?????
 		transactionList.add(getBytes(binaryData,0,126));
 	}
 
