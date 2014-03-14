@@ -129,18 +129,19 @@ public class Bitcoin {
 		// TODO INCLUDE TX FEES!!!!!
 		ByteBuffer valBB = ByteBuffer.allocate(4);
 		valBB.order(ByteOrder.LITTLE_ENDIAN);
-		valBB.putInt(10);
+		valBB.putInt(10 + txFee);
 		System.arraycopy(valBB.array(), 0, coinbase, 4, 4);
-		// calculate the dHash of our public key
 		String pubkey = "-----BEGIN RSA PUBLIC KEY-----\nMIGJAoGBAN3MxXHcbc1VNKTOgdm7W+i/dVnjv8vYGlbkdaTKzYgi8rQm126Sri87\n702UBNzmkkZyKbRKL/Bfc4EG8/Mt9Pd2xQlRyXCL9FnIFWHyhfIQtW+oBsGI5UhG\nI8B8MiPOMfb6d/PdK+vd4riUxHAvCkHW5Lw0szAD1RVGbkG/7qnzAgMBAAE=\n-----END RSA PUBLIC KEY-----";
 		Merkle m = new Merkle();
 		byte[] hashedPubKey = m.dHash(pubkey.getBytes());
 		// put it in the coinbase tx
 		System.arraycopy(hashedPubKey, 0, coinbase, 8, hashedPubKey.length);
 		// now put this at the front of the list of transactions so we can calculate the merkle root
-		transactionList.add(0, hashedPubKey);
+//		transactionList.add(0, hashedPubKey);
+		transactionList.add(0, coinbase);
 		// now we calculate the merkle root. 
 		byte[] merkleRoot = m.calcMerkleRoot(transactionList);
+		System.out.println("merkle root for block 1 header: " + bytesToHex(merkleRoot));
 
 		// build the header using the merkle root and start testing nonces
 		byte[] header = new byte[82];
@@ -185,7 +186,9 @@ public class Bitcoin {
 			System.arraycopy(nonceBytes, 0, header, 74, nonceBytes.length);
 
 			byte[] hash = m.dHash(header);
-			System.arraycopy(hash, hash.length - DIFFICULTY, first24bits, 0, DIFFICULTY);
+		//	System.arraycopy(hash, hash.length - DIFFICULTY, first24bits, 0, DIFFICULTY);
+			System.arraycopy(hash, 0, first24bits, 0, DIFFICULTY);
+			//System.arraycopy(src, srcPos, dest, destPos, length);
 			nonce++;
 		} while (!isAllZeros(first24bits)); 
 
@@ -203,7 +206,7 @@ public class Bitcoin {
 		System.out.println(outputFile.getCanonicalPath());
 		DataOutputStream os = new DataOutputStream(new FileOutputStream("./outputfile.bin"));
 		// write items 1 thru 3
-		os.write(getBytes(binaryData, 0, 130));
+		os.write(getBytes(binaryData, 0, 126));
 		// write item 4
 		os.write(header);
 		// get the tx count. add one for the coinbase
@@ -214,8 +217,8 @@ public class Bitcoin {
 		// write item 5
 		os.write(txCount.array());
 		// write item 6
-		os.write(coinbase);
-		for (int i = 1; i < transactionList.size(); i++) {
+	//	os.write(coinbase);
+		for (int i = 0; i < transactionList.size(); i++) {
 			os.write(transactionList.get(i));
 		}
 		for (String s: balancesMap.keySet()) {
@@ -472,7 +475,7 @@ public class Bitcoin {
 			//System.exit(1);
 		}
 //		System.out.println("TRANSACTION VALID: " + valid);
-		System.out.println();
+//		System.out.println();
 		return currentIndex;
 	}
 

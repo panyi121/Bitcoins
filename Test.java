@@ -54,7 +54,6 @@ public class Test {
 
 		RSAPublicKeySpec pubKey = new RSAPublicKeySpec(modulus, exponent);
 		Cipher c = Cipher.getInstance("RSA/ECB/PKCS1Padding");
-		PKCS1Encoding pkcs1 = new PKCS1Encoding(c);
 
 		KeyFactory keyFactory;
 		keyFactory = KeyFactory.getInstance("RSA");

@@ -23,14 +23,14 @@ public class ParserTest extends SimpleTest {
       return "PEMParserTest";
    }
 
-   private PEMParser openPEMResource(String fileName) throws FileNotFoundException {
-      Reader fRd = new BufferedReader(new InputStreamReader(new ByteArrayInputStream(PUB_KEY_STRING.getBytes())));
+   private PEMParser openPEMResource(String key) throws FileNotFoundException {
+      Reader fRd = new BufferedReader(new InputStreamReader(new ByteArrayInputStream(key.getBytes())));
       return new PEMParser(fRd);
    }
 
    public void performTest() throws Exception {
       Object o;
-      PEMParser pemRd = openPEMResource("461key.pem");
+      PEMParser pemRd = openPEMResource(PUB_KEY_STRING);
       while ((o = pemRd.readObject()) != null) {
          if (o instanceof SubjectPublicKeyInfo) {
             JcaPEMKeyConverter myConverter = new JcaPEMKeyConverter();
