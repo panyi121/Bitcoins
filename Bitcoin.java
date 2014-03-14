@@ -1,7 +1,10 @@
 import java.io.BufferedReader;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.DataOutputStream;
+import java.io.File;
 import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
@@ -29,7 +32,7 @@ import org.bouncycastle.openssl.PEMParser;
 import org.bouncycastle.openssl.jcajce.JcaPEMKeyConverter;
 
 public class Bitcoin {
-	
+
 	private static byte[] binaryData;
 	private static int invalidTransactions;
 	private static Cipher aes;
@@ -42,29 +45,30 @@ public class Bitcoin {
 	public static final int DIFFICULTY = 3;
 
 	private static String identity = "-----BEGIN RSA PUBLIC KEY-----"+
-									 "MIGJAoGBAN3MxXHcbc1VNKTOgdm7W+i/dVnjv8vYGlbkdaTKzYgi8rQm126Sri87"+
-									 "702UBNzmkkZyKbRKL/Bfc4EG8/Mt9Pd2xQlRyXCL9FnIFWHyhfIQtW+oBsGI5UhG"+
-									 "I8B8MiPOMfb6d/PdK+vd4riUxHAvCkHW5Lw0szAD1RVGbkG/7qnzAgMBAAE="+
-									 "-----END RSA PUBLIC KEY-----";
+			"MIGJAoGBAN3MxXHcbc1VNKTOgdm7W+i/dVnjv8vYGlbkdaTKzYgi8rQm126Sri87"+
+			"702UBNzmkkZyKbRKL/Bfc4EG8/Mt9Pd2xQlRyXCL9FnIFWHyhfIQtW+oBsGI5UhG"+
+			"I8B8MiPOMfb6d/PdK+vd4riUxHAvCkHW5Lw0szAD1RVGbkG/7qnzAgMBAAE="+
+			"-----END RSA PUBLIC KEY-----";
 	private static String identityBytes = "1f5a0200bc94ae4264642855786d9c2bb436b9e129ef95e6416136c03f339581";
 	public static int outMoreThanIn = 0;
 	public static int inputOutputMismatch = 0;
 	public static int outputAlreadyUsedCount = 0;
 	public static int invalidIndexCount = 0;
-public static int badSigCount = 0;
-public static int keyNotFoundCount = 0;
+	public static int badSigCount = 0;
+	public static int keyNotFoundCount = 0;
 	private static int txFee;
-	
-	
+	private static Set<Integer> errTxs = new HashSet<Integer>();
+
+
 	// testing stuff
 	private static int keyNotOneCount = 0;
-	
+
 	public static void main(String[] args) throws Exception {
 		txFee = 0;
-	    binaryData = null;
-	    balancesMap = new HashMap<String,Integer>();
-	    invalidTransactions = 0;
-	    validTransactions = 0;
+		binaryData = null;
+		balancesMap = new HashMap<String,Integer>();
+		invalidTransactions = 0;
+		validTransactions = 0;
 		transactions = new HashMap<String,Map<Integer,TransactionOutput>>();
 		transactionList = new LinkedList<byte[]>();
 		try {
@@ -89,12 +93,9 @@ public static int keyNotFoundCount = 0;
 		int numTransactions = numTransactionsBB.getInt(0);
 		System.out.println("numTransactions: " + numTransactions+"\n");
 		int currentIndex = 130;
-//		for(int i = 0; i < 100; i++) {
 		for(int i = 0; i < numTransactions; i++) {
-			System.out.println(i);
+	//		System.out.println(i);
 			currentIndex = processTransaction(currentIndex, i);
-//			if (i == 4565)
-//				break;
 		}
 
 		System.out.println("out more than in: " + outMoreThanIn);
@@ -107,7 +108,6 @@ public static int keyNotFoundCount = 0;
 		System.out.println("valid transactions" + validTransactions);
 		System.out.println("transaction fee total: " + txFee);
 		System.out.println("signatureMap size NOT one count: "+ keyNotOneCount );
-		
 		System.out.println("tx with errors: " + errTxs.toString());
 		// Create block 1 header
 		// before we calculate the merkle root we have to create the coinbase
@@ -117,19 +117,20 @@ public static int keyNotFoundCount = 0;
 
 		byte[] coinbase = new byte[40];
 		// fill in the number of inputs, which is 0 because its a coinbase transaction
+		//System.arraycopy(src, srcPos, dest, destPos, length);
 		ByteBuffer countBB = ByteBuffer.allocate(2);
 		countBB.order(ByteOrder.LITTLE_ENDIAN);
 		countBB.putShort((short)0);
-		System.arraycopy(countBB, 0, coinbase, 0, 2);
+		System.arraycopy(countBB.array(), 0, coinbase, 0, 2);
 		// fill in the number of outputs which is 1
 		countBB.putShort(0, (short) 1);
-		System.arraycopy(countBB, 0, coinbase, 2, 2);
+		System.arraycopy(countBB.array(), 0, coinbase, 2, 2);
 		// fill in the value of this transaction, which is 10 + tx fees.
 		// TODO INCLUDE TX FEES!!!!!
 		ByteBuffer valBB = ByteBuffer.allocate(4);
 		valBB.order(ByteOrder.LITTLE_ENDIAN);
 		valBB.putInt(10);
-		System.arraycopy(valBB, 0, coinbase, 4, 4);
+		System.arraycopy(valBB.array(), 0, coinbase, 4, 4);
 		// calculate the dHash of our public key
 		String pubkey = "-----BEGIN RSA PUBLIC KEY-----\nMIGJAoGBAN3MxXHcbc1VNKTOgdm7W+i/dVnjv8vYGlbkdaTKzYgi8rQm126Sri87\n702UBNzmkkZyKbRKL/Bfc4EG8/Mt9Pd2xQlRyXCL9FnIFWHyhfIQtW+oBsGI5UhG\nI8B8MiPOMfb6d/PdK+vd4riUxHAvCkHW5Lw0szAD1RVGbkG/7qnzAgMBAAE=\n-----END RSA PUBLIC KEY-----";
 		Merkle m = new Merkle();
@@ -162,7 +163,7 @@ public static int keyNotFoundCount = 0;
 		// start 
 		long nonce = Long.MIN_VALUE;
 		byte[] first24bits = new byte[3];
-		
+
 		do {
 			// get the current time
 			long time = System.currentTimeMillis();
@@ -191,7 +192,33 @@ public static int keyNotFoundCount = 0;
 		// we've found a nonce that works so we can build the output file then we are done
 		System.out.println("found a nonce: " + nonce);
 		
-		for(String s: balancesMap.keySet()) {
+		// output fill will be:
+		// 1. The genesis block header
+		// 2. The genesis block transaction count (1)
+		// 3. The genesis transaction
+		// 4. block 1 header
+		// 5. block 1 tx count
+		// 6. that many tx
+		File outputFile = new File("outputfile.bin");
+		System.out.println(outputFile.getCanonicalPath());
+		DataOutputStream os = new DataOutputStream(new FileOutputStream("./outputfile.bin"));
+		// write items 1 thru 3
+		os.write(getBytes(binaryData, 0, 130));
+		// write item 4
+		os.write(header);
+		// get the tx count. add one for the coinbase
+		ByteBuffer txCount = ByteBuffer.allocate(4);
+		txCount.order(ByteOrder.LITTLE_ENDIAN);
+		txCount.putInt(validTransactions + 1);
+		System.out.println(validTransactions + 1);
+		// write item 5
+		os.write(txCount.array());
+		// write item 6
+		os.write(coinbase);
+		for (int i = 1; i < transactionList.size(); i++) {
+			os.write(transactionList.get(i));
+		}
+		for (String s: balancesMap.keySet()) {
 			PrintWriter writer = new PrintWriter("balances.txt", "UTF-8");
 			writer.println("Key: " + s);
 			writer.println("Balance: " + balancesMap.get(s));
@@ -208,16 +235,17 @@ public static int keyNotFoundCount = 0;
 		}
 		return true;
 	}
-	
+
 	public static int processTransaction(int startIndex, int order) throws Exception {
-		System.out.println(startIndex);
+	//	System.out.println(startIndex);
 		// will change to false if the tx being processed is found to be invalid
 		boolean valid = true;
 		// loooks to be a mapping from tx name to indexes of output specifiers within this tx
 		// that have been used as input specifiers
 		Map<String,Set<Integer>> changedMap = new HashMap<String,Set<Integer>>();
+		// a set of InputSpecSigAndPubKey 
+		Set<InputSpecSigAndPubKey> sigKeySet = new HashSet<InputSpecSigAndPubKey>();
 		// a map from hashed public keys to signatures
-		Map<String,byte[]> signatureMap = new HashMap<String,byte[]>();
 		ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
 		//temporary map used to store changes in balance from this transaction, changes copied to main
 		//balances map if transaction deemed valid
@@ -228,11 +256,10 @@ public static int keyNotFoundCount = 0;
 		numInputsBB.order(ByteOrder.LITTLE_ENDIAN);
 		numInputsBB.put(binaryData,currentIndex,2);
 		int inputs = numInputsBB.getShort(0);
-		System.out.println("Num Inputs: " + inputs);
+//		System.out.println("Num Inputs: " + inputs);
 		outputStream.write(getBytes(binaryData,currentIndex,currentIndex + 2));
 		currentIndex += 2;
 		int totalInputValue = 0;
-	//	outputStream.write(getBytes(binaryData,0,2));
 		/* iterate through the inputs and make sure that they:
 		 * 1. all transactions referenced exist
 		 * 2. the outputs referenced in the input specifiers actually exist (index exists)
@@ -242,23 +269,23 @@ public static int keyNotFoundCount = 0;
 		String prevSig = null;
 		for(int i = 0; i < inputs; i++) {
 			int inputStart = currentIndex;
-			System.out.println("\tInput:" + (i+1));
+//			System.out.println("\tInput:" + (i+1));
 			// get the name of the previous transaction this one references
 			byte[] prevTransBytes = getBytes(binaryData,currentIndex,currentIndex+32);
 			currentIndex +=32;
 			String prevTxRef = bytesToHex(prevTransBytes);
-			System.out.println("\tPrev Trans Hash : " + prevTxRef);
+//			System.out.println("\tPrev Trans Hash : " + prevTxRef);
 			// get the index of the output specifier in the referenced transaction
 			ByteBuffer indexBB = ByteBuffer.allocate(2);
 			indexBB.order(ByteOrder.LITTLE_ENDIAN);
 			indexBB.put(binaryData,currentIndex,2);
 			int index = indexBB.getShort(0);
-//			System.out.println("\tPrev Trans index: " + index);
+			//			System.out.println("\tPrev Trans index: " + index);
 			currentIndex += 2;
 			// get the signature of this transaction
 			int signatureStart = currentIndex;
 			byte[] signature = getBytes(binaryData,currentIndex,currentIndex+128);
-//			System.out.println("\tsignature: " + bytesToHex(signature));
+			//			System.out.println("\tsignature: " + bytesToHex(signature));
 			String curSig = bytesToHex(signature);
 			if (prevSig != null && !curSig.equals(prevSig)) {
 				//System.exit(1);
@@ -271,11 +298,11 @@ public static int keyNotFoundCount = 0;
 			lengthBB.order(ByteOrder.LITTLE_ENDIAN);
 			lengthBB.put(binaryData,currentIndex,2);
 			int length = lengthBB.getShort(0);
-//			System.out.println("\tPublic key length: " + length);
+			//			System.out.println("\tPublic key length: " + length);
 			currentIndex+=2;
 			// get the public key bytes
 			byte[] inputKey = getBytes(binaryData,currentIndex,currentIndex+length);
-//			System.out.println("\tinput key: " + bytesToHex(inputKey));
+			//			System.out.println("\tinput key: " + bytesToHex(inputKey));
 			currentIndex+=length;
 			int inputEnd = currentIndex;
 			// write the entire input specifier minus the signature field
@@ -301,9 +328,9 @@ public static int keyNotFoundCount = 0;
 							// check that that hashed public key in the referenced output specifier matches
 							// the hashed public key in the input specifier. Tx is invalid if they do not match
 							if(hashedInputKey.equals(output.getKey())) {
+								sigKeySet.add(new InputSpecSigAndPubKey(new String(inputKey),signature));
 								// add the mapping from the UNHASHED public key of the output referenced in the input to the
 								// signature of the transaction
-								signatureMap.put(new String(inputKey),signature);
 								// add this index to the mapping from transaction names to indexes of output specifiers referenced
 								changedMap.get(prevTxRef).add(index);
 								int value = output.getValue();
@@ -335,7 +362,7 @@ public static int keyNotFoundCount = 0;
 					System.out.println("\tTransaction invalid: Key not found");
 					keyNotFoundCount++;
 					valid = false;
-				//	System.exit(0);
+					//	System.exit(0);
 				}
 			}
 		}
@@ -346,7 +373,7 @@ public static int keyNotFoundCount = 0;
 		numOutputsBB.order(ByteOrder.LITTLE_ENDIAN);
 		numOutputsBB.put(binaryData,currentIndex,2);
 		int outputs = numOutputsBB.getShort(0);
-		System.out.println("\t\tNum Outputs: " + outputs);
+//		System.out.println("\t\tNum Outputs: " + outputs);
 		currentIndex += 2;
 		int totalOutputValue = 0;
 		// a map from index to TransactionOutput, which stores the amount and the hashed public key of the recipient
@@ -357,13 +384,13 @@ public static int keyNotFoundCount = 0;
 			outputValueBB.order(ByteOrder.LITTLE_ENDIAN);
 			outputValueBB.put(binaryData,currentIndex,4);
 			int outputValue = outputValueBB.getInt(0);
-			System.out.println("\t\tOutput Value: " + outputValue);
+//			System.out.println("\t\tOutput Value: " + outputValue);
 			currentIndex += 4;
 			totalOutputValue += outputValue;
 			byte[] hashedPublicKeyBytes = getBytes(binaryData,currentIndex,currentIndex+32);
 			currentIndex +=32;
 			String hexKey = bytesToHex(hashedPublicKeyBytes);
-			System.out.println("\t\tRecipient's dHashed public key: " + hexKey);
+//			System.out.println("\t\tRecipient's dHashed public key: " + hexKey);
 			TransactionOutput output = new TransactionOutput(outputValue,hexKey);
 			outputMap.put(i,output);
 			//subtract value from key's balance
@@ -376,35 +403,42 @@ public static int keyNotFoundCount = 0;
 		if (valid) {
 			outputStream.write(getBytes(binaryData,outputStart,currentIndex));
 			String transactionHash = dHash(getBytes(binaryData,startIndex,currentIndex));
-			System.out.println("\t\tTotal Input Value: " + totalInputValue + " Total output value: " + totalOutputValue);
+//			System.out.println("\t\tTotal Input Value: " + totalInputValue + " Total output value: " + totalOutputValue);
 			// increment the transaction fee
 			if (totalOutputValue < totalInputValue) {
 				txFee += totalInputValue - totalOutputValue;
 			} else if (totalOutputValue > totalInputValue) {
-				System.out.println("\t\tTransaction invalid: Output value > input value, write code to deal with this");
+//				System.out.println("\t\tTransaction invalid: Output value > input value, write code to deal with this");
 				outMoreThanIn++;
 				valid = false;
 			} 
 			if (valid) {
 				byte[] transactionBytes = outputStream.toByteArray();
 				String newHash = dHash(transactionBytes);
-				if (signatureMap.size() != 1) {
+				if (sigKeySet.size() != 1) {
 					keyNotOneCount++; 
 				}
-				for(String key: signatureMap.keySet()) {
-
-					System.out.println(signatureMap.size());
+				for (InputSpecSigAndPubKey in : sigKeySet) {
+	//				System.out.println(sigKeySet.size());
 					// we need to decrypt the signature field of each input specifier using the supplied
 					// public key and make sure that the data equals the dHash of the the entire transaction
 					// minus the signature fields.
-					byte[] signature = signatureMap.get(key);
-					RSAPublicKey publicKey = getKey(key);
+					byte[] signature = in.getSignature();
+	//				System.out.println("\t\t\tsignature: " + signature[0]);
+					RSAPublicKey publicKey = getKey(in.getPublicKey());
 					aes.init(Cipher.DECRYPT_MODE, publicKey);
 					// this should be the dHash of the entire tx
-					byte[] plaintext = aes.doFinal(signature);
-					System.out.println("\t\t\tdecrypted signature: " + bytesToHex(plaintext));
-					System.out.println("\t\t\tdHash of tx:\t " + newHash);
-					System.out.print("\t\t\t" + key);
+					byte[] plaintext = null;
+					try {
+						plaintext = aes.doFinal(signature);
+					} catch (Exception e) {
+						badSigCount++;
+						valid = false;
+						break;
+					}
+	//				System.out.println("\t\t\tdecrypted signature: " + bytesToHex(plaintext));
+	//				System.out.println("\t\t\tdHash of tx:\t " + newHash);
+	//				System.out.print("\t\t\t" + in.getPublicKey());
 					if (!newHash.equals(bytesToHex(plaintext))) {
 						badSigCount++;
 						System.out.println("\t\t\tTransaction invalid: signature not produced with private key corresponding to public key");
@@ -437,13 +471,12 @@ public static int keyNotFoundCount = 0;
 			invalidTransactions++;
 			//System.exit(1);
 		}
-		System.out.println("TRANSACTION VALID: " + valid);
+//		System.out.println("TRANSACTION VALID: " + valid);
 		System.out.println();
 		return currentIndex;
 	}
-	
-	private static Set<Integer> errTxs = new HashSet<Integer>();
-	
+
+
 	public static RSAPublicKey getKey(String key) throws Exception {
 		Object o;
 		PEMParser pemRd = openPEMResource(key);
@@ -478,11 +511,11 @@ public static int keyNotFoundCount = 0;
 		byteArray = md.digest();
 		StringBuffer result = new StringBuffer();
 		for (byte b:byteArray) {
-		    result.append(String.format("%02x", b));
+			result.append(String.format("%02x", b));
 		}
 		return result.toString();
 	}
-	
+
 	public static void parseGenesis() {
 		// set the field for the hash of the genesis block to the hash of the entire genesis block
 		// this is used for creating the next block header
@@ -491,47 +524,47 @@ public static int keyNotFoundCount = 0;
 		Merkle m = new Merkle();
 		dHashOfGenesisBlock = m.dHash(genBlock);
 		System.out.println("Block: dHash (name) = " + dHash(genBlock));
-		
+
 		// get the version number
 		ByteBuffer versionBB = ByteBuffer.allocate(4);
 		versionBB.order(ByteOrder.LITTLE_ENDIAN);
 		versionBB.put(binaryData, 0, 4);
 		System.out.println("Version: " + versionBB.getInt(0));
-	
+
 		// get the previous block hash which should be zero
 		byte[] prevBlockBytes = getBytes(binaryData,4,36);
 		String s1 = bytesToHex(prevBlockBytes);
 		System.out.println("Prev Block Hash : " + s1);
-	
+
 		// get the merkle root
 		byte[] merkleBytes = getBytes(binaryData,36,68);
 		String s2 = bytesToHex(merkleBytes);
 		System.out.println("Merkle : " + s2);
-		
+
 		// get the creation time
 		ByteBuffer creationTimeBB = ByteBuffer.allocate(4);
 		creationTimeBB.order(ByteOrder.LITTLE_ENDIAN);
 		creationTimeBB.put(binaryData,68,4);
 		System.out.println("Creation Time: " + creationTimeBB.getInt(0));
-	
+
 		// get the difficulty
 		ByteBuffer difficultyBB = ByteBuffer.allocate(2);
 		difficultyBB.order(ByteOrder.LITTLE_ENDIAN);
 		difficultyBB.put(binaryData,72,2);
 		System.out.println("Difficulty: " + difficultyBB.getShort(0));
-	
+
 		// get the nonce
 		ByteBuffer nonceBB = ByteBuffer.allocate(8);
 		nonceBB.order(ByteOrder.LITTLE_ENDIAN);
 		nonceBB.put(binaryData,74,8);
 		System.out.println("Nonce: " + nonceBB.getLong(0));
-	
+
 		// get the genesis block transaction count, should be 1
 		ByteBuffer numTransactionsTimeBB = ByteBuffer.allocate(4);
 		numTransactionsTimeBB.order(ByteOrder.LITTLE_ENDIAN);
 		numTransactionsTimeBB.put(binaryData,82,4);
 		System.out.println("\nnumTransactions: " + numTransactionsTimeBB.getInt(0));
-	
+
 		// now we are examining the coinbase transaction
 
 		// get the number of input specifiers. should be zero because its a coinbase transaction
@@ -539,26 +572,26 @@ public static int keyNotFoundCount = 0;
 		numInputsBB.order(ByteOrder.LITTLE_ENDIAN);
 		numInputsBB.put(binaryData,86,2);
 		System.out.println("numInputs: " + numInputsBB.getShort(0));
-	
+
 		// get the number of outputs, should be one
 		ByteBuffer numOutputsBB = ByteBuffer.allocate(2);
 		numOutputsBB.order(ByteOrder.LITTLE_ENDIAN);
 		numOutputsBB.put(binaryData,88,2);
 		System.out.println("numOutputs: " + numOutputsBB.getShort(0));
-	
+
 		// get the value of this coinbase output
 		ByteBuffer valueBB = ByteBuffer.allocate(4);
 		valueBB.order(ByteOrder.LITTLE_ENDIAN);
 		valueBB.put(binaryData,90,4);
 		System.out.println("Value: " + valueBB.getInt(0));
-	
+
 		// 
 		byte[] hashedPublicKeyBytes = getBytes(binaryData,94,126);
 		String s3 = bytesToHex(hashedPublicKeyBytes);
 		System.out.println("Hashed Public Key : " + s3);
-		
+
 		TransactionOutput genesisOutput = new TransactionOutput(valueBB.getInt(0),s3);
-		
+
 
 		Map<Integer, TransactionOutput> genesisOutputMap= new HashMap<Integer,TransactionOutput>();
 		genesisOutputMap.put(0, genesisOutput);
@@ -569,13 +602,13 @@ public static int keyNotFoundCount = 0;
 	}
 
 	public static String bytesToHex(byte[] in) {
-	    final StringBuilder builder = new StringBuilder();
-	    for(byte b : in) {
-	        builder.append(String.format("%02x", b));
-	    }
-	    return builder.toString();
+		final StringBuilder builder = new StringBuilder();
+		for(byte b : in) {
+			builder.append(String.format("%02x", b));
+		}
+		return builder.toString();
 	}
-	
+
 	private static byte[] getBytes(byte[] src, int start, int end) {
 		byte[] bb = new byte[end - start];
 		System.arraycopy(src, start, bb, 0, end - start);
