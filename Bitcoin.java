@@ -55,6 +55,10 @@ public static int badSigCount = 0;
 public static int keyNotFoundCount = 0;
 	private static int txFee;
 	
+	
+	// testing stuff
+	private static int keyNotOneCount = 0;
+	
 	public static void main(String[] args) throws Exception {
 		txFee = 0;
 	    binaryData = null;
@@ -87,11 +91,12 @@ public static int keyNotFoundCount = 0;
 		int currentIndex = 130;
 //		for(int i = 0; i < 100; i++) {
 		for(int i = 0; i < numTransactions; i++) {
-			System.out.println(i+1);
-			currentIndex = processTransaction(currentIndex);
-			if (i == 4565)
-				break;
+			System.out.println(i);
+			currentIndex = processTransaction(currentIndex, i);
+//			if (i == 4565)
+//				break;
 		}
+
 		System.out.println("out more than in: " + outMoreThanIn);
 		System.out.println("hash mismatch count: " + inputOutputMismatch);
 		System.out.println("output already used count: " + outputAlreadyUsedCount);
@@ -101,7 +106,9 @@ public static int keyNotFoundCount = 0;
 		System.out.println("invalid transactions: " + invalidTransactions);
 		System.out.println("valid transactions" + validTransactions);
 		System.out.println("transaction fee total: " + txFee);
-
+		System.out.println("signatureMap size NOT one count: "+ keyNotOneCount );
+		
+		System.out.println("tx with errors: " + errTxs.toString());
 		// Create block 1 header
 		// before we calculate the merkle root we have to create the coinbase
 		// transaction that gives us 10 bitcoins + tx fees because this is the first data item
@@ -202,7 +209,7 @@ public static int keyNotFoundCount = 0;
 		return true;
 	}
 	
-	public static int processTransaction(int startIndex) throws Exception {
+	public static int processTransaction(int startIndex, int order) throws Exception {
 		System.out.println(startIndex);
 		// will change to false if the tx being processed is found to be invalid
 		boolean valid = true;
@@ -232,6 +239,7 @@ public static int keyNotFoundCount = 0;
 		 * 3.
 		 * 4.
 		 */
+		String prevSig = null;
 		for(int i = 0; i < inputs; i++) {
 			int inputStart = currentIndex;
 			System.out.println("\tInput:" + (i+1));
@@ -251,6 +259,11 @@ public static int keyNotFoundCount = 0;
 			int signatureStart = currentIndex;
 			byte[] signature = getBytes(binaryData,currentIndex,currentIndex+128);
 //			System.out.println("\tsignature: " + bytesToHex(signature));
+			String curSig = bytesToHex(signature);
+			if (prevSig != null && !curSig.equals(prevSig)) {
+				//System.exit(1);
+			}
+			prevSig = curSig;
 			currentIndex += 128;
 			int signatureEnd = currentIndex;
 			// get the length of the public key
@@ -375,8 +388,11 @@ public static int keyNotFoundCount = 0;
 			if (valid) {
 				byte[] transactionBytes = outputStream.toByteArray();
 				String newHash = dHash(transactionBytes);
-
+				if (signatureMap.size() != 1) {
+					keyNotOneCount++; 
+				}
 				for(String key: signatureMap.keySet()) {
+
 					System.out.println(signatureMap.size());
 					// we need to decrypt the signature field of each input specifier using the supplied
 					// public key and make sure that the data equals the dHash of the the entire transaction
@@ -417,6 +433,7 @@ public static int keyNotFoundCount = 0;
 		if (valid) {
 			validTransactions++;
 		} else {
+			errTxs.add(order);
 			invalidTransactions++;
 			//System.exit(1);
 		}
@@ -424,6 +441,9 @@ public static int keyNotFoundCount = 0;
 		System.out.println();
 		return currentIndex;
 	}
+	
+	private static Set<Integer> errTxs = new HashSet<Integer>();
+	
 	public static RSAPublicKey getKey(String key) throws Exception {
 		Object o;
 		PEMParser pemRd = openPEMResource(key);
