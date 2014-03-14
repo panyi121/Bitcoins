@@ -47,7 +47,12 @@ public class Bitcoin {
 									 "I8B8MiPOMfb6d/PdK+vd4riUxHAvCkHW5Lw0szAD1RVGbkG/7qnzAgMBAAE="+
 									 "-----END RSA PUBLIC KEY-----";
 	private static String identityBytes = "1f5a0200bc94ae4264642855786d9c2bb436b9e129ef95e6416136c03f339581";
-	
+	public static int outMoreThanIn = 0;
+	public static int inputOutputMismatch = 0;
+	public static int outputAlreadyUsedCount = 0;
+	public static int invalidIndexCount = 0;
+public static int badSigCount = 0;
+public static int keyNotFoundCount = 0;
 	private static int txFee;
 	
 	public static void main(String[] args) throws Exception {
@@ -80,11 +85,19 @@ public class Bitcoin {
 		int numTransactions = numTransactionsBB.getInt(0);
 		System.out.println("numTransactions: " + numTransactions+"\n");
 		int currentIndex = 130;
-//		for(int i = 0; i < 10; i++) {
+//		for(int i = 0; i < 100; i++) {
 		for(int i = 0; i < numTransactions; i++) {
 			System.out.println(i+1);
 			currentIndex = processTransaction(currentIndex);
+			if (i == 4565)
+				break;
 		}
+		System.out.println("out more than in: " + outMoreThanIn);
+		System.out.println("hash mismatch count: " + inputOutputMismatch);
+		System.out.println("output already used count: " + outputAlreadyUsedCount);
+		System.out.println("invalid Index count: " +invalidIndexCount);
+		System.out.println("bad signature count: " + badSigCount);
+		System.out.println("key not found count: " + keyNotFoundCount);
 		System.out.println("invalid transactions: " + invalidTransactions);
 		System.out.println("valid transactions" + validTransactions);
 		System.out.println("transaction fee total: " + txFee);
@@ -190,6 +203,7 @@ public class Bitcoin {
 	}
 	
 	public static int processTransaction(int startIndex) throws Exception {
+		System.out.println(startIndex);
 		// will change to false if the tx being processed is found to be invalid
 		boolean valid = true;
 		// loooks to be a mapping from tx name to indexes of output specifiers within this tx
@@ -208,9 +222,10 @@ public class Bitcoin {
 		numInputsBB.put(binaryData,currentIndex,2);
 		int inputs = numInputsBB.getShort(0);
 		System.out.println("Num Inputs: " + inputs);
+		outputStream.write(getBytes(binaryData,currentIndex,currentIndex + 2));
 		currentIndex += 2;
 		int totalInputValue = 0;
-		outputStream.write(getBytes(binaryData,0,2));
+	//	outputStream.write(getBytes(binaryData,0,2));
 		/* iterate through the inputs and make sure that they:
 		 * 1. all transactions referenced exist
 		 * 2. the outputs referenced in the input specifiers actually exist (index exists)
@@ -230,11 +245,12 @@ public class Bitcoin {
 			indexBB.order(ByteOrder.LITTLE_ENDIAN);
 			indexBB.put(binaryData,currentIndex,2);
 			int index = indexBB.getShort(0);
-			System.out.println("\tPrev Trans index: " + index);
+//			System.out.println("\tPrev Trans index: " + index);
 			currentIndex += 2;
 			// get the signature of this transaction
 			int signatureStart = currentIndex;
 			byte[] signature = getBytes(binaryData,currentIndex,currentIndex+128);
+//			System.out.println("\tsignature: " + bytesToHex(signature));
 			currentIndex += 128;
 			int signatureEnd = currentIndex;
 			// get the length of the public key
@@ -242,15 +258,17 @@ public class Bitcoin {
 			lengthBB.order(ByteOrder.LITTLE_ENDIAN);
 			lengthBB.put(binaryData,currentIndex,2);
 			int length = lengthBB.getShort(0);
-			System.out.println("\tPublic key length: " + length);
+//			System.out.println("\tPublic key length: " + length);
 			currentIndex+=2;
 			// get the public key bytes
 			byte[] inputKey = getBytes(binaryData,currentIndex,currentIndex+length);
+//			System.out.println("\tinput key: " + bytesToHex(inputKey));
 			currentIndex+=length;
 			int inputEnd = currentIndex;
 			// write the entire input specifier minus the signature field
 			outputStream.write(getBytes(binaryData,inputStart,signatureStart));
 			outputStream.write(getBytes(binaryData,signatureEnd,inputEnd));
+
 			if (valid) {
 				// only perform these checks if the transaction is valid so far. Otherwise we just
 				// need to keep looping to figure out where the next tx starts
@@ -286,20 +304,25 @@ public class Bitcoin {
 									tempBalancesMap.put(hashedInputKey,tempBalancesMap.get(hashedInputKey)-value);
 								}
 							} else {
+								inputOutputMismatch++;
 								System.out.println("\tTransaction invalid: Hashed input key does not equal hashed output key");
 								valid = false;
 							}
 						} else { 
+							outputAlreadyUsedCount++;
 							System.out.println("\tTransaction invalid: Output already used before");
 							valid = false;
 						}
 					} else {
+						invalidIndexCount++;
 						System.out.println("\tTransaction invalid: Index not found in transaction's output map");
 						valid = false;
 					}
 				} else {
 					System.out.println("\tTransaction invalid: Key not found");
+					keyNotFoundCount++;
 					valid = false;
+				//	System.exit(0);
 				}
 			}
 		}
@@ -346,6 +369,7 @@ public class Bitcoin {
 				txFee += totalInputValue - totalOutputValue;
 			} else if (totalOutputValue > totalInputValue) {
 				System.out.println("\t\tTransaction invalid: Output value > input value, write code to deal with this");
+				outMoreThanIn++;
 				valid = false;
 			} 
 			if (valid) {
@@ -366,6 +390,7 @@ public class Bitcoin {
 					System.out.println("\t\t\tdHash of tx:\t " + newHash);
 					System.out.print("\t\t\t" + key);
 					if (!newHash.equals(bytesToHex(plaintext))) {
+						badSigCount++;
 						System.out.println("\t\t\tTransaction invalid: signature not produced with private key corresponding to public key");
 						valid = false;
 					}
@@ -393,13 +418,12 @@ public class Bitcoin {
 			validTransactions++;
 		} else {
 			invalidTransactions++;
-			System.exit(1);
+			//System.exit(1);
 		}
 		System.out.println("TRANSACTION VALID: " + valid);
 		System.out.println();
 		return currentIndex;
 	}
-
 	public static RSAPublicKey getKey(String key) throws Exception {
 		Object o;
 		PEMParser pemRd = openPEMResource(key);
@@ -520,8 +544,8 @@ public class Bitcoin {
 		genesisOutputMap.put(0, genesisOutput);
 
 		transactions.put(s2,genesisOutputMap);
-		// should this be included?????
-		transactionList.add(getBytes(binaryData,0,126));
+		// should this be included????? don't think so
+		//transactionList.add(getBytes(binaryData,0,126));
 	}
 
 	public static String bytesToHex(byte[] in) {
