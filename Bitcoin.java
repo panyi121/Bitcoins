@@ -38,18 +38,10 @@ public class Bitcoin {
 	private static Cipher aes;
 	private static int validTransactions;
 	private static List<byte[]> transactionList;
-	private static String genesisBlockName;
 	private static Map<String,Integer> balancesMap;
 	private static byte[] dHashOfGenesisBlock;
 	private static Map<String,Map<Integer,TransactionOutput>> transactions;
 	public static final int DIFFICULTY = 3;
-
-	private static String identity = "-----BEGIN RSA PUBLIC KEY-----"+
-			"MIGJAoGBAN3MxXHcbc1VNKTOgdm7W+i/dVnjv8vYGlbkdaTKzYgi8rQm126Sri87"+
-			"702UBNzmkkZyKbRKL/Bfc4EG8/Mt9Pd2xQlRyXCL9FnIFWHyhfIQtW+oBsGI5UhG"+
-			"I8B8MiPOMfb6d/PdK+vd4riUxHAvCkHW5Lw0szAD1RVGbkG/7qnzAgMBAAE="+
-			"-----END RSA PUBLIC KEY-----";
-	private static String identityBytes = "1f5a0200bc94ae4264642855786d9c2bb436b9e129ef95e6416136c03f339581";
 	public static int outMoreThanIn = 0;
 	public static int inputOutputMismatch = 0;
 	public static int outputAlreadyUsedCount = 0;
@@ -126,7 +118,6 @@ public class Bitcoin {
 		countBB.putShort(0, (short) 1);
 		System.arraycopy(countBB.array(), 0, coinbase, 2, 2);
 		// fill in the value of this transaction, which is 10 + tx fees.
-		// TODO INCLUDE TX FEES!!!!!
 		ByteBuffer valBB = ByteBuffer.allocate(4);
 		valBB.order(ByteOrder.LITTLE_ENDIAN);
 		valBB.putInt(10 + txFee);
@@ -137,7 +128,6 @@ public class Bitcoin {
 		// put it in the coinbase tx
 		System.arraycopy(hashedPubKey, 0, coinbase, 8, hashedPubKey.length);
 		// now put this at the front of the list of transactions so we can calculate the merkle root
-//		transactionList.add(0, hashedPubKey);
 		transactionList.add(0, coinbase);
 		// now we calculate the merkle root. 
 		byte[] merkleRoot = m.calcMerkleRoot(transactionList);
@@ -161,10 +151,9 @@ public class Bitcoin {
 		difficultyBB.putShort((short)3);
 		byte[] difficultyBytes = difficultyBB.array();
 		System.arraycopy(difficultyBytes, 0, header, 72, difficultyBytes.length);
-		// start 
+		// search for a nonce
 		long nonce = Long.MIN_VALUE;
 		byte[] first24bits = new byte[3];
-
 		do {
 			// get the current time
 			long time = System.currentTimeMillis();
@@ -186,9 +175,7 @@ public class Bitcoin {
 			System.arraycopy(nonceBytes, 0, header, 74, nonceBytes.length);
 
 			byte[] hash = m.dHash(header);
-		//	System.arraycopy(hash, hash.length - DIFFICULTY, first24bits, 0, DIFFICULTY);
 			System.arraycopy(hash, 0, first24bits, 0, DIFFICULTY);
-			//System.arraycopy(src, srcPos, dest, destPos, length);
 			nonce++;
 		} while (!isAllZeros(first24bits)); 
 
@@ -216,8 +203,7 @@ public class Bitcoin {
 		System.out.println(validTransactions + 1);
 		// write item 5
 		os.write(txCount.array());
-		// write item 6
-	//	os.write(coinbase);
+		// write item 6. includes coinbase, which is 0th in the list
 		for (int i = 0; i < transactionList.size(); i++) {
 			os.write(transactionList.get(i));
 		}
@@ -263,13 +249,7 @@ public class Bitcoin {
 		outputStream.write(getBytes(binaryData,currentIndex,currentIndex + 2));
 		currentIndex += 2;
 		int totalInputValue = 0;
-		/* iterate through the inputs and make sure that they:
-		 * 1. all transactions referenced exist
-		 * 2. the outputs referenced in the input specifiers actually exist (index exists)
-		 * 3.
-		 * 4.
-		 */
-		String prevSig = null;
+		
 		for(int i = 0; i < inputs; i++) {
 			int inputStart = currentIndex;
 //			System.out.println("\tInput:" + (i+1));
@@ -290,10 +270,6 @@ public class Bitcoin {
 			byte[] signature = getBytes(binaryData,currentIndex,currentIndex+128);
 			//			System.out.println("\tsignature: " + bytesToHex(signature));
 			String curSig = bytesToHex(signature);
-			if (prevSig != null && !curSig.equals(prevSig)) {
-				//System.exit(1);
-			}
-			prevSig = curSig;
 			currentIndex += 128;
 			int signatureEnd = currentIndex;
 			// get the length of the public key
@@ -339,7 +315,6 @@ public class Bitcoin {
 								int value = output.getValue();
 								// transaction is valid so far, so increment its total value
 								totalInputValue += value;
-
 								//subtract value from key's balance
 								if(!tempBalancesMap.containsKey(hashedInputKey)) {
 									tempBalancesMap.put(hashedInputKey,0-value);
@@ -365,7 +340,6 @@ public class Bitcoin {
 					System.out.println("\tTransaction invalid: Key not found");
 					keyNotFoundCount++;
 					valid = false;
-					//	System.exit(0);
 				}
 			}
 		}
@@ -422,7 +396,6 @@ public class Bitcoin {
 					keyNotOneCount++; 
 				}
 				for (InputSpecSigAndPubKey in : sigKeySet) {
-	//				System.out.println(sigKeySet.size());
 					// we need to decrypt the signature field of each input specifier using the supplied
 					// public key and make sure that the data equals the dHash of the the entire transaction
 					// minus the signature fields.
@@ -472,7 +445,6 @@ public class Bitcoin {
 		} else {
 			errTxs.add(order);
 			invalidTransactions++;
-			//System.exit(1);
 		}
 //		System.out.println("TRANSACTION VALID: " + valid);
 //		System.out.println();
@@ -588,7 +560,6 @@ public class Bitcoin {
 		valueBB.put(binaryData,90,4);
 		System.out.println("Value: " + valueBB.getInt(0));
 
-		// 
 		byte[] hashedPublicKeyBytes = getBytes(binaryData,94,126);
 		String s3 = bytesToHex(hashedPublicKeyBytes);
 		System.out.println("Hashed Public Key : " + s3);
