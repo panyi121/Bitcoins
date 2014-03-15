@@ -1,6 +1,7 @@
 import java.io.BufferedReader;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.File;
 import java.io.FileNotFoundException;
@@ -9,6 +10,7 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
 import java.io.Reader;
+import java.net.Socket;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.file.Files;
@@ -56,6 +58,23 @@ public class Bitcoin {
 	private static int keyNotOneCount = 0;
 
 	public static void main(String[] args) throws Exception {
+		String hostname = args[0];
+		int port = Integer.parseInt(args[1]);
+		String inFile = args[2];
+		String outFile = args[3];
+		Socket s = null;
+		s = new Socket(hostname, port);
+		DataInputStream in = new DataInputStream(s.getInputStream());
+		// write all the data to a file
+		File data = new File(inFile);
+		DataOutputStream out = new DataOutputStream(new FileOutputStream(data));
+		byte[] buf = new byte[1024];
+		int bytesRead = 0;
+		while ((bytesRead = in.read(buf)) != -1) {
+			out.write(buf, 0, bytesRead);
+		}
+		s.close();
+		out.close();
 		txFee = 0;
 		binaryData = null;
 		balancesMap = new HashMap<String,Integer>();
@@ -64,7 +83,8 @@ public class Bitcoin {
 		transactions = new HashMap<String,Map<Integer,TransactionOutput>>();
 		transactionList = new LinkedList<byte[]>();
 		try {
-			Path path = Paths.get("./src/transactionData-10000-3.bin");
+			//Path path = Paths.get("./src/transactionData-10000-3.bin");
+			Path path = Paths.get(inFile);
 			binaryData = Files.readAllBytes(path);
 			System.out.println(binaryData.length);
 		} catch (IOException e) {
@@ -189,9 +209,9 @@ public class Bitcoin {
 		// 4. block 1 header
 		// 5. block 1 tx count
 		// 6. that many tx
-		File outputFile = new File("outputfile.bin");
+		File outputFile = new File(outFile);
 		System.out.println(outputFile.getCanonicalPath());
-		DataOutputStream os = new DataOutputStream(new FileOutputStream("./outputfile.bin"));
+		DataOutputStream os = new DataOutputStream(new FileOutputStream(outFile));
 		// write items 1 thru 3
 		os.write(getBytes(binaryData, 0, 126));
 		// write item 4
@@ -207,13 +227,16 @@ public class Bitcoin {
 		for (int i = 0; i < transactionList.size(); i++) {
 			os.write(transactionList.get(i));
 		}
-		for (String s: balancesMap.keySet()) {
-			PrintWriter writer = new PrintWriter("balances.txt", "UTF-8");
-			writer.println("Key: " + s);
-			writer.println("Balance: " + balancesMap.get(s));
+		PrintWriter writer = new PrintWriter("balances.txt", "UTF-8");
+		for (String str: balancesMap.keySet()) {
+			writer.println("Key: " + str);
+			System.out.println("dHashed public key: " + str);
+			writer.println("Balance: " + balancesMap.get(str));
+			System.out.println("Balance: " + balancesMap.get(str));
 			writer.println();
-			writer.close();
-		}
+		}			
+		writer.close();
+		os.close();
 	}
 
 	public static boolean isAllZeros(byte[] input) {
